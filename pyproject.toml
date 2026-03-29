@@ -32,9 +32,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/spss-mcp"
-Repository = "https://github.com/yourusername/spss-mcp"
-Issues = "https://github.com/yourusername/spss-mcp/issues"
+Homepage = "https://github.com/Exekiel179/SPSS-MCP"
+Repository = "https://github.com/Exekiel179/SPSS-MCP"
+Issues = "https://github.com/Exekiel179/SPSS-MCP/issues"
 
 [project.optional-dependencies]
 dev = [
