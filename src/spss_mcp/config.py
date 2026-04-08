@@ -10,7 +10,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load .env from project root or current directory
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# Load .env from project root first and let repo-local settings override inherited shell values.
+load_dotenv(_PROJECT_ROOT / ".env", override=True)
 load_dotenv()
 
 
@@ -116,9 +119,20 @@ def get_spss_executable() -> str | None:
 def get_timeout() -> int:
     """Return SPSS batch timeout in seconds (default 120)."""
     try:
-        return int(os.environ.get("SPSS_TIMEOUT", "120"))
+        timeout = int(os.environ.get("SPSS_TIMEOUT", "120"))
     except ValueError:
         return 120
+    return timeout if timeout > 0 else 120
+
+
+def get_runtime_config() -> dict:
+    """Return the effective runtime configuration used for SPSS execution."""
+    return {
+        "timeout": get_timeout(),
+        "temp_dir": str(get_temp_dir()),
+        "results_dir": str(get_results_dir()),
+        "spss_path": get_spss_executable(),
+    }
 
 
 def get_temp_dir() -> Path:

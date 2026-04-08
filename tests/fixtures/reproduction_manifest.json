@@ -1,0 +1,130 @@
+[
+  {
+    "id": "case01_desc",
+    "title": "描述统计：某课程考试成绩",
+    "syntax_kind": "raw",
+    "file_path": "F:/MCP/数据资料_1_20231124170101117/数据文件zip_1/�����ļ�/4 ����ͳ�Ʒ���/ĳ�γ̿��Գɼ�.sav",
+    "params": {
+      "syntax": "DESCRIPTIVES VARIABLES=ALL /STATISTICS=MEAN STDDEV MIN MAX."
+    },
+    "execution_context": {},
+    "expected_success": true,
+    "required_output_markers": ["Descriptive Statistics", "1172"]
+  },
+  {
+    "id": "case02_corr",
+    "title": "相关分析：大学英语成绩",
+    "syntax_kind": "raw",
+    "file_path": "F:/MCP/数据资料_1_20231124170101117/数据文件zip_1/�����ļ�/5 ��ط���/��ѧӢ��ɼ�.sav",
+    "params": {
+      "syntax": "CORRELATIONS /VARIABLES=Chinese English /PRINT=TWOTAIL NOSIG."
+    },
+    "execution_context": {},
+    "expected_success": true,
+    "required_output_markers": ["Correlations", ".776"]
+  },
+  {
+    "id": "case03_ttest_ind",
+    "title": "独立样本t检验：统计技术",
+    "syntax_kind": "raw",
+    "file_path": "F:/MCP/数据资料_1_20231124170101117/数据文件zip_1/�����ļ�/6 �Ƚ�ƽ��ֵ/ͳ�Ƽ���.sav",
+    "params": {
+      "syntax": "T-TEST GROUPS=班级(1 2) /VARIABLES=分数."
+    },
+    "execution_context": {},
+    "expected_success": true,
+    "required_output_markers": ["Independent Samples Test", "-2.738"]
+  },
+  {
+    "id": "case04_anova_2way",
+    "title": "双因素方差分析：统计功效实验",
+    "syntax_kind": "raw",
+    "file_path": "F:/MCP/数据资料_1_20231124170101117/数据文件zip_1/�����ļ�/7 �������/ͳ�ƹ�Ч����--��ѧ����.sav",
+    "params": {
+      "syntax": "UNIANOVA 成绩 BY 教学方法 教学态度 /METHOD=SSTYPE(3) /INTERCEPT=INCLUDE /PRINT=DESCRIPTIVE ETASQ HOMOGENEITY /DESIGN=教学方法 教学态度 教学方法*教学态度."
+    },
+    "execution_context": {},
+    "expected_success": true,
+    "required_output_markers": ["Tests of Between-Subjects Effects", "21.876"]
+  },
+  {
+    "id": "case05_factor",
+    "title": "探索性因子分析：大学生学习困难调查",
+    "syntax_kind": "raw",
+    "file_path": "F:/MCP/数据资料_1_20231124170101117/数据文件zip_1/�����ļ�/8 ��������/��ѧ��ѧϰ���ѵ����ʾ�.sav",
+    "params": {
+      "syntax": "FACTOR /VARIABLES=v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15 v16 v17 /MISSING=LISTWISE /ANALYSIS=v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15 v16 v17 /PRINT=INITIAL EXTRACTION ROTATION KMO /CRITERIA=FACTORS(4) ITERATE(25) /EXTRACTION=PC /ROTATION=VARIMAX."
+    },
+    "execution_context": {},
+    "expected_success": true,
+    "required_output_markers": ["Total Variance Explained", "53.485"]
+  },
+  {
+    "id": "case06_regression",
+    "title": "线性回归：学习与倦怠",
+    "tool": "spss_regression",
+    "file_path": "F:/MCP/数据资料_1_20231124170101117/数据文件zip_1/�����ļ�/9 �ع����/ѧϰ�뵡�������.sav",
+    "params": {
+      "dependent": "学习倦怠指数",
+      "predictors": ["学习态度", "每周学习时间"],
+      "method": "ENTER",
+      "include_diagnostics": false
+    },
+    "execution_context": {},
+    "expected_success": true,
+    "required_output_markers": ["Model Summary", ".902"]
+  },
+  {
+    "id": "case07_reliability",
+    "title": "信度分析：问卷总分",
+    "tool": "spss_reliability_alpha",
+    "file_path": "F:/MCP/数据资料_1_20231124170101117/数据文件zip_1/�����ļ�/10 �Ŷ���Ч�ȷ���/�������������.sav",
+    "params": {
+      "variables": ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19", "v20"],
+      "model": "ALPHA"
+    },
+    "execution_context": {},
+    "expected_success": true,
+    "required_output_markers": ["Reliability Statistics", ".733"]
+  },
+  {
+    "id": "case08_nonparam",
+    "title": "配对非参数检验：训练前后成绩",
+    "tool": "spss_nonparametric_tests",
+    "file_path": "F:/MCP/数据资料_1_20231124170101117/数据文件zip_1/�����ļ�/11 �ǲ����������/11��ѧ��ѵ��ǰ��ĳɼ�.sav",
+    "params": {
+      "test_type": "wilcoxon",
+      "variables": ["训练前成绩", "训练后成绩"]
+    },
+    "execution_context": {},
+    "expected_success": true,
+    "required_output_markers": ["Wilcoxon Signed Ranks Test", "-2.856"]
+  },
+  {
+    "id": "case09_cluster",
+    "title": "层次聚类：工作价值观",
+    "tool": "spss_cluster_hierarchical",
+    "file_path": "F:/MCP/数据资料_1_20231124170101117/数据文件zip_1/�����ļ�/15 ̽�������ӷ���������Ӧ��/��ѧ��ҵ���Ĺ�����ֵ�۵���.sav",
+    "params": {
+      "variables": ["合作性", "分配", "职位出发点", "工作投入", "发展机会", "社会地位", "权力距离", "职位升迁", "领导风格"],
+      "method": "WARD",
+      "measure": "SEUCLID",
+      "dendrogram": false
+    },
+    "execution_context": {},
+    "expected_success": true,
+    "required_output_markers": ["Agglomeration Schedule", "Ward Linkage"]
+  },
+  {
+    "id": "case10_ancova",
+    "title": "协方差分析：思维训练实验",
+    "syntax_kind": "raw",
+    "file_path": "F:/MCP/数据资料_1_20231124170101117/数据文件zip_1/�����ļ�/17 SPSSӦ�÷�������С��/˼ά�߼�˼άѵ��ʵ������.sav",
+    "params": {
+      "syntax": "UNIANOVA 后测成绩 BY 实验组别 WITH 前测成绩 /METHOD=SSTYPE(3) /INTERCEPT=INCLUDE /PRINT=DESCRIPTIVE ETASQ PARAMETER /DESIGN=前测成绩 实验组别."
+    },
+    "execution_context": {},
+    "expected_success": true,
+    "required_output_markers": ["Tests of Between-Subjects Effects", "38.318"]
+  }
+]

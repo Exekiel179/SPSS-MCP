@@ -69,7 +69,7 @@ def main():
             executable_args = ["-m", "spss_mcp.cli", "serve", "--transport", "stdio"]
 
         from spss_mcp._version import __version__
-        from spss_mcp.config import detect_capabilities
+        from spss_mcp.config import detect_capabilities, get_timeout
         caps = detect_capabilities()
 
         print(f"=== SPSS MCP v{__version__} Setup Info ===")
@@ -90,7 +90,7 @@ def main():
                     "args": executable_args,
                     "env": {
                         "SPSS_INSTALL_PATH": spss_install,
-                        "SPSS_TIMEOUT": "120",
+                        "SPSS_TIMEOUT": str(get_timeout()),
                     },
                 }
             }

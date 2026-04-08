@@ -16,6 +16,7 @@ Ask your AI assistant in plain language — SPSS-MCP translates the request into
 - **33 statistical analysis tools** covering the full range of psychology and social science research methods
 - **Uses the real SPSS engine** — results are identical to what you'd get clicking through SPSS menus
 - **File-only mode** — read `.sav` metadata and preview data even without SPSS installed (via `pyreadstat`)
+- **Registry-backed cold-method support** — rarer methods now run through structured schemas, validated parameters, and syntax templates instead of ad-hoc generation
 - **Persistent artifacts** — every run saves a `.spv` viewer file and a `.sps` syntax file for auditing and reproducibility
 - **Auto-detects SPSS** via Windows registry; no manual path configuration needed in most cases
 
@@ -126,12 +127,33 @@ SPSS-MCP will call the right tools, execute the SPSS syntax, and return the resu
 
 ---
 
-## Available Tools (33 total)
+## Support Levels
 
-### File & Data (6)
+SPSS-MCP now exposes four practical support tiers:
+
+| Tier | Meaning |
+|---|---|
+| File-only | Reads `.sav` metadata/data without IBM SPSS |
+| Stable tool | Common analyses backed by dedicated MCP tools |
+| Registry-backed | Colder methods backed by schemas, validation, and syntax templates |
+| Experimental syntax | Anything reachable via `spss_run_syntax`, primarily dependent on model-authored syntax |
+
+Registry-backed methods can also be introspected before execution with:
+- `spss_list_supported_methods`
+- `spss_get_method_schema`
+- `spss_get_method_support`
+
+---
+
+## Available Tools (36 total)
+
+### File & Data (9)
 | Tool | Description |
 |---|---|
 | `spss_check_status` | Check server capabilities and SPSS version |
+| `spss_list_supported_methods` | List registry-backed cold methods and their support tags |
+| `spss_get_method_schema` | Inspect a registry-backed method schema for orchestration |
+| `spss_get_method_support` | Inspect support metadata and coverage assertions for a method |
 | `spss_list_files` | List `.sav` / `.zsav` files in a directory |
 | `spss_list_variables` | List variables with labels (searchable) |
 | `spss_read_metadata` | Read variable types, labels, value labels |
@@ -154,36 +176,36 @@ SPSS-MCP will call the right tools, execute the SPSS syntax, and return the resu
 ### Advanced Regression & GLM (3)
 | Tool | Description |
 |---|---|
-| `spss_logistic_regression` | Binary / multinomial logistic regression |
-| `spss_ordinal_regression` | Ordinal regression (PLUM) |
-| `spss_genlin` | Generalized linear models (Poisson, Gamma, etc.) |
+| `spss_logistic_regression` | Binary / multinomial logistic regression — registry-backed |
+| `spss_ordinal_regression` | Ordinal regression (PLUM) — registry-backed |
+| `spss_genlin` | Generalized linear models (Poisson, Gamma, etc.) — registry-backed |
 
 ### Multilevel & Mixed Models (2)
 | Tool | Description |
 |---|---|
-| `spss_mixed` | Linear mixed-effects models with random effects |
-| `spss_genlinmixed` | Generalized linear mixed models (GLMM) |
+| `spss_mixed` | Linear mixed-effects models with random effects — registry-backed |
+| `spss_genlinmixed` | Generalized linear mixed models (GLMM) — registry-backed |
 
 ### Survival Analysis (2)
 | Tool | Description |
 |---|---|
-| `spss_cox_regression` | Cox proportional hazards regression |
-| `spss_kaplan_meier` | Kaplan-Meier curves with log-rank test |
+| `spss_cox_regression` | Cox proportional hazards regression — registry-backed |
+| `spss_kaplan_meier` | Kaplan-Meier curves with log-rank test — registry-backed |
 
 ### Multivariate Analysis (5)
 | Tool | Description |
 |---|---|
 | `spss_factor` | Exploratory factor analysis (PCA / PAF + rotation) |
-| `spss_discriminant` | Discriminant analysis |
-| `spss_manova` | Multivariate ANOVA |
-| `spss_glm_univariate` | Univariate GLM with factorial designs and EMMs |
+| `spss_discriminant` | Discriminant analysis — registry-backed |
+| `spss_manova` | Multivariate ANOVA — registry-backed |
+| `spss_glm_univariate` | Univariate GLM with factorial designs and EMMs — registry-backed |
 | `spss_repeated_measures_anova` | Repeated measures ANOVA + Greenhouse-Geisser |
 
 ### Clustering (2)
 | Tool | Description |
 |---|---|
-| `spss_cluster_hierarchical` | Hierarchical clustering with dendrogram |
-| `spss_twostep_cluster` | Two-step cluster analysis (auto cluster count) |
+| `spss_cluster_hierarchical` | Hierarchical clustering with dendrogram — registry-backed |
+| `spss_twostep_cluster` | Two-step cluster analysis (auto cluster count) — registry-backed |
 
 ### Reliability & Scale (2)
 | Tool | Description |
@@ -231,6 +253,9 @@ Without IBM SPSS Statistics installed, only the 6 file & data tools work. Analys
 ```bash
 # Compile check
 python -m compileall src/spss_mcp
+
+# Run tests
+pytest
 
 # Run CLI
 spss-mcp status

@@ -9,7 +9,13 @@ from typing import Literal, Optional
 
 from fastmcp import Context, FastMCP
 
-from spss_mcp.config import detect_capabilities
+from spss_mcp.config import detect_capabilities, get_runtime_config
+from spss_mcp.method_registry import (
+    build_registered_syntax,
+    get_method_definition,
+    get_method_schema,
+    list_registered_methods,
+)
 
 
 # ─── Lifespan ─────────────────────────────────────────────────────────────────
@@ -42,7 +48,7 @@ def _get_caps(ctx: Context) -> dict:
 
 def _require_spss(ctx: Context) -> str | None:
     """Return error message if SPSS is not available, else None."""
-    caps = _get_caps(ctx)
+    caps = detect_capabilities()
     if not caps.get("spss"):
         return (
             "This tool requires IBM SPSS Statistics to be installed and detected. "
@@ -60,10 +66,10 @@ def _require_pyreadstat(ctx: Context) -> str | None:
 
 
 def _format_run_result(result: dict) -> str:
-    if result.get("error") and not result.get("output_markdown"):
-        return f"Error: {result['error']}"
-
     output = result.get("output_markdown") or "_No output produced._"
+
+    if result.get("error"):
+        output = f"Error: {result['error']}\n\n{output}"
 
     viewer_file = result.get("viewer_output_file")
     if viewer_file:
@@ -80,7 +86,107 @@ def _format_run_result(result: dict) -> str:
     return output
 
 
+def _registered_method_summary(method) -> list[str]:
+    return [
+        method.tool_name,
+        method.command_family,
+        method.support_level,
+        ", ".join(method.doc_tags),
+    ]
+
+
+async def _run_registered_method(tool_name: str, file_path: str, ctx: Context, **params) -> str:
+    err = _require_spss(ctx)
+    if err:
+        return f"Error: {err}"
+
+    from spss_mcp.spss_runner import run_syntax
+
+    syntax = build_registered_syntax(tool_name, file_path, **params)
+    result = await run_syntax(syntax)
+    return _format_run_result(result)
+
+
 # ─── Group 1: Status & File Tools (no SPSS needed) ───────────────────────────
+
+@mcp.tool(
+    name="spss_list_supported_methods",
+    description=(
+        "List registry-backed SPSS methods available for structured execution. "
+        "Use this to discover cold methods that have schemas, templates, and coverage assertions."
+    ),
+)
+async def spss_list_supported_methods(ctx: Context = None) -> str:
+    try:
+        from tabulate import tabulate
+
+        rows = [_registered_method_summary(method) for method in list_registered_methods()]
+        return tabulate(
+            rows,
+            headers=["Tool", "Command", "Support", "Tags"],
+            tablefmt="github",
+        )
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"spss_list_supported_methods error: {e}")
+        return f"Error: {e}"
+
+
+@mcp.tool(
+    name="spss_get_method_schema",
+    description=(
+        "Get the JSON schema for a registry-backed SPSS method. "
+        "Useful for structured orchestration and parameter inspection before execution."
+    ),
+)
+async def spss_get_method_schema(tool_name: str, ctx: Context = None) -> str:
+    try:
+        import json
+
+        method = get_method_definition(tool_name)
+        payload = {
+            "tool_name": method.tool_name,
+            "command_family": method.command_family,
+            "support_level": method.support_level,
+            "doc_tags": list(method.doc_tags),
+            "assertions": list(method.assertions),
+            "schema": get_method_schema(tool_name),
+        }
+        return json.dumps(payload, indent=2, ensure_ascii=False)
+    except KeyError:
+        return f"Error: Unknown registry-backed method: {tool_name}"
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"spss_get_method_schema error: {e}")
+        return f"Error: {e}"
+
+
+@mcp.tool(
+    name="spss_get_method_support",
+    description=(
+        "Get support metadata for a registry-backed SPSS method, including command family, "
+        "support tier, coverage assertions, and documentation tags."
+    ),
+)
+async def spss_get_method_support(tool_name: str, ctx: Context = None) -> str:
+    try:
+        method = get_method_definition(tool_name)
+        lines = [
+            f"# {method.tool_name}",
+            "",
+            f"- Command family: `{method.command_family}`",
+            f"- Support level: `{method.support_level}`",
+            f"- Doc tags: {', '.join(method.doc_tags)}",
+            f"- Coverage assertions: {', '.join(method.assertions)}",
+        ]
+        return "\n".join(lines)
+    except KeyError:
+        return f"Error: Unknown registry-backed method: {tool_name}"
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"spss_get_method_support error: {e}")
+        return f"Error: {e}"
+
 
 @mcp.tool(
     name="spss_check_status",
@@ -94,6 +200,7 @@ async def spss_check_status(ctx: Context) -> str:
     try:
         from spss_mcp._version import __version__
         caps = detect_capabilities()
+        runtime = get_runtime_config()
         lines = [
             f"# SPSS MCP Server Status (v{__version__})\n",
             "## Capabilities\n",
@@ -104,6 +211,9 @@ async def spss_check_status(ctx: Context) -> str:
             f"| IBM SPSS Statistics (batch) | {'✅ Found' if caps['spss'] else '❌ Not found'} |",
             "",
         ]
+        lines.append(f"**Effective timeout:** `{runtime['timeout']}` seconds")
+        lines.append(f"**Temp dir:** `{runtime['temp_dir']}`")
+        lines.append(f"**Results dir:** `{runtime['results_dir']}`\n")
         if caps["spss"]:
             lines.append(f"**SPSS path:** `{caps['spss_path']}`\n")
         else:
@@ -299,6 +409,8 @@ async def spss_run_syntax(
     data_file: Optional[str] = None,
     save_viewer_output: bool = True,
     save_syntax_file: bool = True,
+    filter_variable: Optional[str] = None,
+    select_if: Optional[str] = None,
     ctx: Context = None,
 ) -> str:
     try:
@@ -312,6 +424,8 @@ async def spss_run_syntax(
             data_file=data_file,
             save_viewer_output=save_viewer_output,
             save_syntax_file=save_syntax_file,
+            filter_variable=filter_variable,
+            select_if=select_if,
         )
         return _format_run_result(result)
     except Exception as e:
@@ -811,49 +925,19 @@ async def spss_logistic_regression(
     print_options: Optional[list[str]] = None,
     ctx: Context = None,
 ) -> str:
-    """
-    Binary/multinomial logistic regression.
-
-    Args:
-        file_path: Path to .sav file
-        dependent: Dependent variable (binary or categorical)
-        predictors: List of predictor variables
-        method: Variable selection method (ENTER/FSTEP/BSTEP)
-        categorical: List of categorical predictors
-        contrast: Contrast coding for categorical (INDICATOR/SIMPLE/DEVIATION/etc)
-        save_predicted: Save predicted probabilities and group membership
-        print_options: Additional print options (CI/CORR/ITER/etc)
-    """
     try:
-        err = _require_spss(ctx)
-        if err:
-            return f"Error: {err}"
-
-        from spss_mcp.spss_runner import run_syntax
-
-        syntax = f"GET FILE='{file_path.replace(chr(92), '/')}'.\n"
-        syntax += f"LOGISTIC REGRESSION VARIABLES {dependent}\n"
-        syntax += f"  /METHOD={method} {' '.join(predictors)}\n"
-
-        if categorical:
-            cat_spec = ' '.join(categorical)
-            if contrast:
-                syntax += f"  /CATEGORICAL={cat_spec}({contrast})\n"
-            else:
-                syntax += f"  /CATEGORICAL={cat_spec}\n"
-
-        if save_predicted:
-            syntax += "  /SAVE=PRED PGROUP\n"
-
-        if print_options:
-            syntax += f"  /PRINT={' '.join(print_options)}\n"
-        else:
-            syntax += "  /PRINT=GOODFIT CI(95)\n"
-
-        syntax += "  /CRITERIA=PIN(0.05) POUT(0.10) ITERATE(20) CUT(0.5).\n"
-
-        result = await run_syntax(syntax, data_file=file_path)
-        return _format_run_result(result)
+        return await _run_registered_method(
+            "spss_logistic_regression",
+            file_path,
+            ctx,
+            dependent=dependent,
+            predictors=predictors,
+            method=method,
+            categorical=categorical,
+            contrast=contrast,
+            save_predicted=save_predicted,
+            print_options=print_options,
+        )
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_logistic_regression error: {e}")
@@ -878,44 +962,18 @@ async def spss_ordinal_regression(
     test_parallel: bool = True,
     ctx: Context = None,
 ) -> str:
-    """
-    Ordinal regression for ordered categorical dependent variable.
-
-    Args:
-        file_path: Path to .sav file
-        dependent: Ordered categorical dependent variable
-        predictors: List of predictor variables
-        link: Link function (LOGIT/PROBIT/CLOGLOG/NLOGLOG/CAUCHIT)
-        categorical: List of categorical predictors
-        save_predicted: Save predicted category and probabilities
-        test_parallel: Test parallel lines assumption
-    """
     try:
-        err = _require_spss(ctx)
-        if err:
-            return f"Error: {err}"
-
-        from spss_mcp.spss_runner import run_syntax
-
-        syntax = f"GET FILE='{file_path.replace(chr(92), '/')}'.\n"
-        syntax += f"PLUM {dependent} WITH {' '.join(predictors)}\n"
-        syntax += f"  /LINK={link}\n"
-
-        if categorical:
-            syntax += f"  /CATEGORICAL={' '.join(categorical)}\n"
-
-        if save_predicted:
-            syntax += "  /SAVE=PCPROB ACPROB\n"
-
-        syntax += "  /PRINT=FIT PARAMETER SUMMARY\n"
-
-        if test_parallel:
-            syntax += "  /TEST=PARALLEL\n"
-
-        syntax += "  /CRITERIA=CIN(95) DELTA(0) LCONVERGE(0) MXITER(100) MXSTEP(5) PCONVERGE(1.0E-6) SINGULAR(1.0E-8).\n"
-
-        result = await run_syntax(syntax, data_file=file_path)
-        return _format_run_result(result)
+        return await _run_registered_method(
+            "spss_ordinal_regression",
+            file_path,
+            ctx,
+            dependent=dependent,
+            predictors=predictors,
+            link=link,
+            categorical=categorical,
+            save_predicted=save_predicted,
+            test_parallel=test_parallel,
+        )
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_ordinal_regression error: {e}")
@@ -941,55 +999,19 @@ async def spss_genlin(
     save_predicted: bool = False,
     ctx: Context = None,
 ) -> str:
-    """
-    Generalized linear model with flexible distribution families.
-
-    Args:
-        file_path: Path to .sav file
-        dependent: Dependent variable
-        predictors: List of predictor variables
-        distribution: Distribution family (NORMAL/BINOMIAL/POISSON/GAMMA/IGAUSS/NEGBIN/MULTINOMIAL)
-        link: Link function (auto-selected if None based on distribution)
-        scale: Scale parameter method (MLE/DEVIANCE/PEARSON)
-        categorical: List of categorical predictors
-        save_predicted: Save predicted values and residuals
-    """
     try:
-        err = _require_spss(ctx)
-        if err:
-            return f"Error: {err}"
-
-        from spss_mcp.spss_runner import run_syntax
-
-        syntax = f"GET FILE='{file_path.replace(chr(92), '/')}'.\n"
-        syntax += f"GENLIN {dependent}"
-
-        if predictors:
-            syntax += f" WITH {' '.join(predictors)}\n"
-        else:
-            syntax += "\n"
-
-        if categorical:
-            syntax += f"  /CATEGORICAL={' '.join(categorical)}\n"
-
-        syntax += f"  /MODEL {' '.join(predictors)} DISTRIBUTION={distribution}"
-
-        if link:
-            syntax += f" LINK={link}\n"
-        else:
-            syntax += "\n"
-
-        if scale:
-            syntax += f"  /SCALE={scale}\n"
-
-        if save_predicted:
-            syntax += "  /SAVE=PRED RESID\n"
-
-        syntax += "  /PRINT=SOLUTION SUMMARY\n"
-        syntax += "  /CRITERIA=SCALE=1 COVB=MODEL PCONVERGE=1E-6 SINGULAR=1E-12 ANALYSISTYPE=3(WALD) CILEVEL=95 CITYPE=WALD LIKELIHOOD=FULL.\n"
-
-        result = await run_syntax(syntax, data_file=file_path)
-        return _format_run_result(result)
+        return await _run_registered_method(
+            "spss_genlin",
+            file_path,
+            ctx,
+            dependent=dependent,
+            predictors=predictors,
+            distribution=distribution,
+            link=link,
+            scale=scale,
+            categorical=categorical,
+            save_predicted=save_predicted,
+        )
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_genlin error: {e}")
@@ -1018,64 +1040,20 @@ async def spss_mixed(
     covtype_random: Optional[str] = None,
     ctx: Context = None,
 ) -> str:
-    """
-    Linear mixed-effects model for hierarchical/nested data.
-
-    Args:
-        file_path: Path to .sav file
-        dependent: Dependent variable
-        fixed_effects: List of fixed effect predictors
-        random_effects: List of random effect variables
-        subject: Subject/grouping variable for random effects
-        repeated: Repeated measures variable
-        repeated_type: Covariance structure for repeated (AR1/CS/UN/etc)
-        method: Estimation method (REML/ML)
-        covtype_random: Covariance type for random effects (VC/UN/CS/etc)
-    """
     try:
-        err = _require_spss(ctx)
-        if err:
-            return f"Error: {err}"
-
-        from spss_mcp.spss_runner import run_syntax
-
-        syntax = f"GET FILE='{file_path.replace(chr(92), '/')}'.\n"
-        syntax += f"MIXED {dependent}"
-
-        if fixed_effects:
-            syntax += f" WITH {' '.join(fixed_effects)}\n"
-        else:
-            syntax += "\n"
-
-        # Fixed effects
-        if fixed_effects:
-            syntax += f"  /FIXED={' '.join(fixed_effects)}\n"
-        else:
-            syntax += "  /FIXED=INTERCEPT\n"
-
-        # Random effects
-        if random_effects and subject:
-            random_spec = ' '.join(random_effects) if random_effects else "INTERCEPT"
-            syntax += f"  /RANDOM={random_spec} | SUBJECT({subject})"
-            if covtype_random:
-                syntax += f" COVTYPE({covtype_random})\n"
-            else:
-                syntax += "\n"
-
-        # Repeated measures
-        if repeated and subject:
-            syntax += f"  /REPEATED={repeated} | SUBJECT({subject})"
-            if repeated_type:
-                syntax += f" COVTYPE({repeated_type})\n"
-            else:
-                syntax += " COVTYPE(AR1)\n"
-
-        syntax += f"  /METHOD={method}\n"
-        syntax += "  /PRINT=SOLUTION TESTCOV\n"
-        syntax += "  /CRITERIA=CIN(95) MXITER(100) MXSTEP(10) SCORING(1) SINGULAR(0.000000000001) HCONVERGE(0, ABSOLUTE) LCONVERGE(0, ABSOLUTE) PCONVERGE(0.000001, ABSOLUTE).\n"
-
-        result = await run_syntax(syntax, data_file=file_path)
-        return _format_run_result(result)
+        return await _run_registered_method(
+            "spss_mixed",
+            file_path,
+            ctx,
+            dependent=dependent,
+            fixed_effects=fixed_effects,
+            random_effects=random_effects,
+            subject=subject,
+            repeated=repeated,
+            repeated_type=repeated_type,
+            method=method,
+            covtype_random=covtype_random,
+        )
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_mixed error: {e}")
@@ -1100,51 +1078,18 @@ async def spss_genlinmixed(
     link: Optional[str] = None,
     ctx: Context = None,
 ) -> str:
-    """
-    Generalized linear mixed model for non-normal hierarchical data.
-
-    Args:
-        file_path: Path to .sav file
-        dependent: Dependent variable
-        fixed_effects: List of fixed effect predictors
-        random_effects: List of random effect variables
-        subject: Subject/grouping variable
-        distribution: Distribution family (NORMAL/BINOMIAL/POISSON/GAMMA/NEGBIN)
-        link: Link function (auto if None)
-    """
     try:
-        err = _require_spss(ctx)
-        if err:
-            return f"Error: {err}"
-
-        from spss_mcp.spss_runner import run_syntax
-
-        syntax = f"GET FILE='{file_path.replace(chr(92), '/')}'.\n"
-        syntax += f"GENLINMIXED\n"
-        syntax += f"  /DATA_STRUCTURE SUBJECTS={subject}\n" if subject else ""
-        syntax += f"  /FIELDS TARGET={dependent} TRIALS=NONE OFFSET=NONE\n"
-
-        if fixed_effects:
-            syntax += f"  /FIXED EFFECTS={' '.join(fixed_effects)} USE_INTERCEPT=TRUE\n"
-        else:
-            syntax += "  /FIXED USE_INTERCEPT=TRUE\n"
-
-        if random_effects and subject:
-            random_spec = ' '.join(random_effects)
-            syntax += f"  /RANDOM EFFECTS={random_spec} USE_INTERCEPT=TRUE SUBJECTS={subject}\n"
-
-        syntax += f"  /BUILD_OPTIONS TARGET_CATEGORY_ORDER=ASCENDING INPUTS_CATEGORY_ORDER=ASCENDING MAX_ITERATIONS=100 CONFIDENCE_LEVEL=95 DF_METHOD=RESIDUAL COVB=ROBUST\n"
-        syntax += f"  /TARGET_OPTIONS DISTRIBUTION={distribution}"
-
-        if link:
-            syntax += f" LINK={link}\n"
-        else:
-            syntax += "\n"
-
-        syntax += "  /PRINT SOLUTION.\n"
-
-        result = await run_syntax(syntax, data_file=file_path)
-        return _format_run_result(result)
+        return await _run_registered_method(
+            "spss_genlinmixed",
+            file_path,
+            ctx,
+            dependent=dependent,
+            fixed_effects=fixed_effects,
+            random_effects=random_effects,
+            subject=subject,
+            distribution=distribution,
+            link=link,
+        )
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_genlinmixed error: {e}")
@@ -1173,46 +1118,20 @@ async def spss_cox_regression(
     save_survival: bool = False,
     ctx: Context = None,
 ) -> str:
-    """
-    Cox proportional hazards regression for survival data.
-
-    Args:
-        file_path: Path to .sav file
-        time_variable: Time to event variable
-        status_variable: Status variable (censored/event)
-        status_event_value: Value indicating event occurred (e.g., 1)
-        predictors: List of predictor variables
-        method: Variable selection method (ENTER/FSTEP/BSTEP)
-        categorical: List of categorical predictors
-        strata: Stratification variables
-        save_survival: Save survival function and hazard
-    """
     try:
-        err = _require_spss(ctx)
-        if err:
-            return f"Error: {err}"
-
-        from spss_mcp.spss_runner import run_syntax
-
-        syntax = f"GET FILE='{file_path.replace(chr(92), '/')}'.\n"
-        syntax += f"COXREG {time_variable}\n"
-        syntax += f"  /STATUS={status_variable}({status_event_value})\n"
-        syntax += f"  /METHOD={method} {' '.join(predictors)}\n"
-
-        if categorical:
-            syntax += f"  /CATEGORICAL={' '.join(categorical)}\n"
-
-        if strata:
-            syntax += f"  /STRATA={' '.join(strata)}\n"
-
-        if save_survival:
-            syntax += "  /SAVE=SURVIVAL HAZARD\n"
-
-        syntax += "  /PRINT=CI(95)\n"
-        syntax += "  /CRITERIA=PIN(.05) POUT(.10) ITERATE(20).\n"
-
-        result = await run_syntax(syntax, data_file=file_path)
-        return _format_run_result(result)
+        return await _run_registered_method(
+            "spss_cox_regression",
+            file_path,
+            ctx,
+            time_variable=time_variable,
+            status_variable=status_variable,
+            status_event_value=status_event_value,
+            predictors=predictors,
+            method=method,
+            categorical=categorical,
+            strata=strata,
+            save_survival=save_survival,
+        )
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_cox_regression error: {e}")
@@ -1237,48 +1156,18 @@ async def spss_kaplan_meier(
     percentiles: Optional[list[int]] = None,
     ctx: Context = None,
 ) -> str:
-    """
-    Kaplan-Meier survival analysis and group comparison.
-
-    Args:
-        file_path: Path to .sav file
-        time_variable: Time to event variable
-        status_variable: Status variable (censored/event)
-        status_event_value: Value indicating event occurred
-        strata: Grouping variable for comparison
-        compare_method: Group comparison method (LOGRANK/BRESLOW/TARONE)
-        percentiles: Survival percentiles to estimate (e.g., [25, 50, 75])
-    """
     try:
-        err = _require_spss(ctx)
-        if err:
-            return f"Error: {err}"
-
-        from spss_mcp.spss_runner import run_syntax
-
-        syntax = f"GET FILE='{file_path.replace(chr(92), '/')}'.\n"
-        syntax += f"KM {time_variable}"
-
-        if strata:
-            syntax += f" BY {strata}\n"
-        else:
-            syntax += "\n"
-
-        syntax += f"  /STATUS={status_variable}({status_event_value})\n"
-
-        if strata:
-            syntax += f"  /COMPARE={compare_method}\n"
-
-        syntax += "  /PRINT=TABLE MEAN\n"
-
-        if percentiles:
-            pct_str = ' '.join(map(str, percentiles))
-            syntax += f"  /PERCENTILES={pct_str}\n"
-
-        syntax += "  /PLOT=SURVIVAL.\n"
-
-        result = await run_syntax(syntax, data_file=file_path)
-        return _format_run_result(result)
+        return await _run_registered_method(
+            "spss_kaplan_meier",
+            file_path,
+            ctx,
+            time_variable=time_variable,
+            status_variable=status_variable,
+            status_event_value=status_event_value,
+            strata=strata,
+            compare_method=compare_method,
+            percentiles=percentiles,
+        )
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_kaplan_meier error: {e}")
@@ -1305,46 +1194,18 @@ async def spss_discriminant(
     save_class: bool = False,
     ctx: Context = None,
 ) -> str:
-    """
-    Discriminant analysis for group classification.
-
-    Args:
-        file_path: Path to .sav file
-        groups: Grouping variable
-        predictors: List of discriminating variables
-        method: Variable selection (DIRECT/WILKS/MAHAL)
-        priors: Prior probabilities (EQUAL/SIZE)
-        save_scores: Save discriminant scores
-        save_class: Save predicted group membership
-    """
     try:
-        err = _require_spss(ctx)
-        if err:
-            return f"Error: {err}"
-
-        from spss_mcp.spss_runner import run_syntax
-
-        syntax = f"GET FILE='{file_path.replace(chr(92), '/')}'.\n"
-        syntax += f"DISCRIMINANT\n"
-        syntax += f"  /GROUPS={groups}\n"
-        syntax += f"  /VARIABLES={' '.join(predictors)}\n"
-        syntax += f"  /ANALYSIS ALL\n"
-        syntax += f"  /METHOD={method}\n"
-        syntax += f"  /PRIORS={priors}\n"
-
-        if save_scores or save_class:
-            save_opts = []
-            if save_scores:
-                save_opts.append("SCORES")
-            if save_class:
-                save_opts.append("CLASS")
-            syntax += f"  /SAVE={' '.join(save_opts)}\n"
-
-        syntax += "  /STATISTICS=MEAN STDDEV UNIVF BOXM COEF RAW CORR COV GCOV TABLE\n"
-        syntax += "  /CLASSIFY=NONMISSING POOLED.\n"
-
-        result = await run_syntax(syntax, data_file=file_path)
-        return _format_run_result(result)
+        return await _run_registered_method(
+            "spss_discriminant",
+            file_path,
+            ctx,
+            groups=groups,
+            predictors=predictors,
+            method=method,
+            priors=priors,
+            save_scores=save_scores,
+            save_class=save_class,
+        )
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_discriminant error: {e}")
@@ -1368,39 +1229,17 @@ async def spss_cluster_hierarchical(
     dendrogram: bool = True,
     ctx: Context = None,
 ) -> str:
-    """
-    Hierarchical cluster analysis.
-
-    Args:
-        file_path: Path to .sav file
-        variables: List of clustering variables
-        method: Linkage method (BAVERAGE/WAVERAGE/SINGLE/COMPLETE/CENTROID/MEDIAN/WARD)
-        measure: Distance measure (SEUCLID/EUCLID/COSINE/PEARSON/etc)
-        id_variable: Case identifier variable for labeling
-        dendrogram: Generate dendrogram plot
-    """
     try:
-        err = _require_spss(ctx)
-        if err:
-            return f"Error: {err}"
-
-        from spss_mcp.spss_runner import run_syntax
-
-        syntax = f"GET FILE='{file_path.replace(chr(92), '/')}'.\n"
-        syntax += f"CLUSTER {' '.join(variables)}\n"
-
-        if id_variable:
-            syntax += f"  /ID={id_variable}\n"
-
-        syntax += f"  /METHOD={method}\n"
-        syntax += f"  /MEASURE={measure}\n"
-        syntax += "  /PRINT=SCHEDULE CLUSTER(2,4)\n"
-
-        if dendrogram:
-            syntax += "  /PLOT=DENDROGRAM VICICLE.\n"
-
-        result = await run_syntax(syntax, data_file=file_path)
-        return _format_run_result(result)
+        return await _run_registered_method(
+            "spss_cluster_hierarchical",
+            file_path,
+            ctx,
+            variables=variables,
+            method=method,
+            measure=measure,
+            id_variable=id_variable,
+            dendrogram=dendrogram,
+        )
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_cluster_hierarchical error: {e}")
@@ -1425,52 +1264,18 @@ async def spss_twostep_cluster(
     outlier_handling: bool = True,
     ctx: Context = None,
 ) -> str:
-    """
-    Two-step cluster analysis for automatic clustering.
-
-    Args:
-        file_path: Path to .sav file
-        continuous: List of continuous variables
-        categorical: List of categorical variables
-        distance: Distance measure (EUCLID for continuous, CHISQ for categorical)
-        num_clusters: Fixed number of clusters (None for auto)
-        max_clusters: Maximum clusters to consider if auto
-        outlier_handling: Enable outlier treatment
-    """
     try:
-        err = _require_spss(ctx)
-        if err:
-            return f"Error: {err}"
-
-        from spss_mcp.spss_runner import run_syntax
-
-        if not continuous and not categorical:
-            return "Error: Must specify at least one continuous or categorical variable"
-
-        syntax = f"GET FILE='{file_path.replace(chr(92), '/')}'.\n"
-        syntax += "TWOSTEP CLUSTER\n"
-
-        if continuous:
-            syntax += f"  /CONTINUOUS {' '.join(continuous)}\n"
-
-        if categorical:
-            syntax += f"  /CATEGORICAL {' '.join(categorical)}\n"
-
-        syntax += f"  /DISTANCE={distance}\n"
-
-        if num_clusters:
-            syntax += f"  /NUMCLUSTERS=FIXED({num_clusters})\n"
-        else:
-            syntax += f"  /NUMCLUSTERS=AUTO({max_clusters})\n"
-
-        if outlier_handling:
-            syntax += "  /OUTLIERS=YES\n"
-
-        syntax += "  /PRINT=MODELINFO CLUSTERINFO\n"
-        syntax += "  /PLOT=SILHOUETTE.\n"
-
-        result = await run_syntax(syntax, data_file=file_path)
-        return _format_run_result(result)
+        return await _run_registered_method(
+            "spss_twostep_cluster",
+            file_path,
+            ctx,
+            continuous=continuous,
+            categorical=categorical,
+            distance=distance,
+            num_clusters=num_clusters,
+            max_clusters=max_clusters,
+            outlier_handling=outlier_handling,
+        )
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_twostep_cluster error: {e}")
@@ -1497,48 +1302,18 @@ async def spss_manova(
     print_univariate: bool = True,
     ctx: Context = None,
 ) -> str:
-    """
-    Multivariate analysis of variance.
-
-    Args:
-        file_path: Path to .sav file
-        dependents: List of dependent variables
-        factors: List of factor variables
-        covariates: List of covariate variables
-        method: Sum of squares type (SSTYPE1/2/3/4)
-        print_multivariate: Print multivariate tests
-        print_univariate: Print univariate tests
-    """
     try:
-        err = _require_spss(ctx)
-        if err:
-            return f"Error: {err}"
-
-        from spss_mcp.spss_runner import run_syntax
-
-        syntax = f"GET FILE='{file_path.replace(chr(92), '/')}'.\n"
-        syntax += f"MANOVA {' '.join(dependents)} BY {' '.join(factors)}"
-
-        if covariates:
-            syntax += f" WITH {' '.join(covariates)}\n"
-        else:
-            syntax += "\n"
-
-        syntax += f"  /METHOD={method}\n"
-
-        print_opts = []
-        if print_multivariate:
-            print_opts.append("SIGNIF(MULTIV)")
-        if print_univariate:
-            print_opts.append("SIGNIF(UNIV)")
-
-        if print_opts:
-            syntax += f"  /PRINT={' '.join(print_opts)}\n"
-
-        syntax += "  /DESIGN.\n"
-
-        result = await run_syntax(syntax, data_file=file_path)
-        return _format_run_result(result)
+        return await _run_registered_method(
+            "spss_manova",
+            file_path,
+            ctx,
+            dependents=dependents,
+            factors=factors,
+            covariates=covariates,
+            method=method,
+            print_multivariate=print_multivariate,
+            print_univariate=print_univariate,
+        )
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_manova error: {e}")
@@ -1564,51 +1339,19 @@ async def spss_glm_univariate(
     save_predicted: bool = False,
     ctx: Context = None,
 ) -> str:
-    """
-    Univariate general linear model for factorial designs.
-
-    Args:
-        file_path: Path to .sav file
-        dependent: Dependent variable
-        factors: List of factor variables
-        covariates: List of covariate variables
-        emmeans: Variables for estimated marginal means
-        posthoc: Variables for post-hoc comparisons
-        posthoc_method: Post-hoc method (TUKEY/BONFERRONI/SCHEFFE/etc)
-        save_predicted: Save predicted values and residuals
-    """
     try:
-        err = _require_spss(ctx)
-        if err:
-            return f"Error: {err}"
-
-        from spss_mcp.spss_runner import run_syntax
-
-        syntax = f"GET FILE='{file_path.replace(chr(92), '/')}'.\n"
-        syntax += f"UNIANOVA {dependent} BY {' '.join(factors)}"
-
-        if covariates:
-            syntax += f" WITH {' '.join(covariates)}\n"
-        else:
-            syntax += "\n"
-
-        if emmeans:
-            for var in emmeans:
-                syntax += f"  /EMMEANS=TABLES({var})\n"
-
-        if posthoc and posthoc_method:
-            posthoc_vars = ' '.join(posthoc)
-            syntax += f"  /POSTHOC={posthoc_vars}({posthoc_method})\n"
-
-        if save_predicted:
-            syntax += "  /SAVE=PRED RESID\n"
-
-        syntax += "  /PRINT=DESCRIPTIVE ETASQ HOMOGENEITY\n"
-        syntax += "  /CRITERIA=ALPHA(.05)\n"
-        syntax += "  /DESIGN.\n"
-
-        result = await run_syntax(syntax, data_file=file_path)
-        return _format_run_result(result)
+        return await _run_registered_method(
+            "spss_glm_univariate",
+            file_path,
+            ctx,
+            dependent=dependent,
+            factors=factors,
+            covariates=covariates,
+            emmeans=emmeans,
+            posthoc=posthoc,
+            posthoc_method=posthoc_method,
+            save_predicted=save_predicted,
+        )
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_glm_univariate error: {e}")

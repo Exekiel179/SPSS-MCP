@@ -33,11 +33,28 @@ def _build_execution_syntax(
     syntax: str,
     data_file: Optional[str] = None,
 ) -> str:
+    normalized = syntax.lstrip()
+    has_data_open = normalized.upper().startswith("GET FILE=")
     data_line = ""
-    if data_file:
+    if data_file and not has_data_open:
         data_file_fwd = data_file.replace("\\", "/")
         data_line = f"GET FILE='{data_file_fwd}'.\n"
     return f"{data_line}{syntax.rstrip()}\n"
+
+
+def _build_selection_syntax(
+    filter_variable: Optional[str] = None,
+    select_if: Optional[str] = None,
+) -> str:
+    if filter_variable and select_if:
+        raise ValueError("filter_variable and select_if cannot be used together")
+
+    prelude = "USE ALL.\nFILTER OFF.\nWEIGHT OFF.\nSPLIT FILE OFF.\n"
+    if filter_variable:
+        return prelude + f"FILTER BY {filter_variable}.\n"
+    if select_if:
+        return prelude + f"TEMPORARY.\nSELECT IF ({select_if}).\n"
+    return prelude
 
 
 def _build_full_syntax(
@@ -127,6 +144,8 @@ async def run_syntax(
     data_file: Optional[str] = None,
     save_viewer_output: bool = True,
     save_syntax_file: bool = True,
+    filter_variable: Optional[str] = None,
+    select_if: Optional[str] = None,
 ) -> dict:
     """
     Execute SPSS syntax via the XD API (SPSS Python3 subprocess) and return structured result.
@@ -144,6 +163,11 @@ async def run_syntax(
     if not stats_exe:
         return {
             "success": False,
+            "timed_out": False,
+            "last_error_level": 0,
+            "process_returncode": None,
+            "parsed_errors": [],
+            "parsed_warnings": [],
             "output_markdown": "",
             "output_raw": "",
             "error": (
@@ -158,6 +182,11 @@ async def run_syntax(
     if not spss_python:
         return {
             "success": False,
+            "timed_out": False,
+            "last_error_level": 0,
+            "process_returncode": None,
+            "parsed_errors": [],
+            "parsed_warnings": [],
             "output_markdown": "",
             "output_raw": "",
             "error": (
@@ -180,6 +209,12 @@ async def run_syntax(
         syntax=syntax,
         data_file=data_file,
     )
+    selection_syntax = _build_selection_syntax(
+        filter_variable=filter_variable,
+        select_if=select_if,
+    )
+    if selection_syntax:
+        execution_syntax = execution_syntax.replace("\n", "\n" + selection_syntax, 1)
     full_syntax = _build_full_syntax(
         execution_syntax=execution_syntax,
         output_file=str(output_file),
@@ -214,6 +249,11 @@ async def run_syntax(
         except subprocess.TimeoutExpired:
             return {
                 "success": False,
+                "timed_out": True,
+                "last_error_level": 0,
+                "process_returncode": None,
+                "parsed_errors": [],
+                "parsed_warnings": [],
                 "output_markdown": "",
                 "output_raw": "",
                 "error": (
@@ -225,21 +265,21 @@ async def run_syntax(
         except FileNotFoundError as e:
             return {
                 "success": False,
+                "timed_out": False,
+                "last_error_level": 0,
+                "process_returncode": None,
+                "parsed_errors": [],
+                "parsed_warnings": [],
                 "output_markdown": "",
                 "output_raw": "",
                 "error": f"SPSS Python3 not found: {e}",
                 "warnings": [],
             }
 
-        # Read OMS output file
-        raw_output = ""
-        if output_file.exists():
-            raw_output = output_file.read_text(encoding="utf-8-sig", errors="replace")
-
+        stdout_text = proc.stdout or ""
         stderr_text = (proc.stderr or "").strip()
 
         # Detect success
-        stdout_text = proc.stdout or ""
         ok_signal = "__spss_ok__" in stdout_text
         viewer_ok_signal = "__spss_viewer_ok__" in stdout_text
 
@@ -249,15 +289,38 @@ async def run_syntax(
         viewer_missing_signal = "__spss_viewer_missing__" in stderr_text
         viewer_err_signal = "__spss_viewer_error__" in stderr_text
 
-        # Success = output file was produced (even if SPSS emitted a SpssError warning)
-        success = ok_signal and bool(raw_output) and proc.returncode == 0
+        last_error_level = 0
+        for line in stdout_text.splitlines():
+            if line.startswith("__spss_err_level__="):
+                try:
+                    last_error_level = int(line.split("=", 1)[1].strip())
+                except ValueError:
+                    last_error_level = 0
+                break
 
+        # Read OMS output file
+        raw_output = ""
+        if output_file.exists():
+            raw_output = output_file.read_text(encoding="utf-8-sig", errors="replace")
         if not raw_output and stderr_text:
             raw_output = stderr_text
 
+        from spss_mcp.output_parser import extract_errors, extract_warnings
+
+        parsed_errors = extract_errors(raw_output) if raw_output else []
+        parsed_warnings = extract_warnings(raw_output) if raw_output else []
+        has_fatal_error = last_error_level >= 3 or err_signal
+
+        success = (
+            ok_signal
+            and bool(raw_output)
+            and proc.returncode == 0
+            and not has_fatal_error
+        )
+
         markdown = parse_spss_output(raw_output) if raw_output else "_No output produced._"
 
-        warnings: list[str] = []
+        warnings: list[str] = list(parsed_warnings)
 
         # Append any SPSS-level warnings to the markdown output
         if warn_signal and success:
@@ -283,7 +346,10 @@ async def run_syntax(
 
         error_msg = None
         if not success:
-            if err_signal:
+            if last_error_level >= 3:
+                fatal_details = "; ".join(parsed_errors) if parsed_errors else f"SPSS reported fatal error level {last_error_level}"
+                error_msg = fatal_details
+            elif err_signal:
                 error_msg = stderr_text.replace("__spss_error__=", "SPSS error: ")
             elif no_output:
                 error_msg = "SPSS ran but produced no output file."
@@ -304,6 +370,11 @@ async def run_syntax(
 
         return {
             "success": success,
+            "timed_out": False,
+            "last_error_level": last_error_level,
+            "process_returncode": proc.returncode,
+            "parsed_errors": parsed_errors,
+            "parsed_warnings": parsed_warnings,
             "output_markdown": markdown,
             "output_raw": raw_output,
             "viewer_output_file": viewer_output_file,
@@ -389,13 +460,13 @@ def build_regression_syntax(
     include_diagnostics: bool,
 ) -> str:
     preds_str = " ".join(predictors)
-    diag = "  /STATISTICS=COEFF OUTS R ANOVA COLLIN TOL\n" if include_diagnostics else "  /STATISTICS=COEFF OUTS R ANOVA\n"
+    diag = "COEFF OUTS R ANOVA COLLIN TOL" if include_diagnostics else "COEFF OUTS R ANOVA"
     return (
         f"GET FILE='{file_path}'.\n"
         f"REGRESSION\n"
+        f"  /STATISTICS={diag}\n"
         f"  /DEPENDENT {dependent}\n"
-        f"  /METHOD={method.upper()} {preds_str}\n"
-        f"{diag}."
+        f"  /METHOD={method.upper()} {preds_str}.\n"
     )
 
 
