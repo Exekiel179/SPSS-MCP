@@ -27,11 +27,25 @@ Describe your analysis in plain language — SPSS-MCP translates it into SPSS sy
 
 ---
 
+## Platform Support
+
+| Platform | File & Data tools (9) | Analysis tools (27) |
+|---|---|---|
+| Windows 10 / 11 | ✓ | ✓ (requires IBM SPSS Statistics) |
+| macOS | ✓ | ✗ |
+| Linux | ✓ | ✗ |
+
+The 9 File & Data tools (`spss_file_summary`, `spss_read_metadata`, `spss_read_data`, `spss_list_variables`, `spss_list_files`, `spss_import_csv`, etc.) use [pyreadstat](https://github.com/Roche/pyreadstat) and work on any platform.
+
+All 27 analysis tools require the **SPSS XD API** — a Windows-only Python extension bundled inside IBM SPSS Statistics. This module (`spss`) is not available on macOS or Linux, so those platforms cannot run any statistical procedures through this server.
+
+---
+
 ## Requirements
 
 | Item | Version / Notes |
 |---|---|
-| OS | Windows 10 / 11 (SPSS XD API is Windows-only) |
+| OS | Windows 10 / 11 |
 | Python | 3.10 or higher |
 | IBM SPSS Statistics | Version 20–31 — required for analysis tools; file-only mode works without it |
 | Claude Code | Any version with MCP support |
