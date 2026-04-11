@@ -216,7 +216,7 @@ async def run_syntax(
         markdown += f"\n\n> **Viewer save note:** {viewer_error}"
 
     # ── Open .spv in SPSS Statistics Viewer ──────────────────────────────────
-    if viewer_output_file:
+    if viewer_output_file and success:
         import os as _os
         import sys as _sys
         try:
