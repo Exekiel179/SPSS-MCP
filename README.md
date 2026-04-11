@@ -7,34 +7,40 @@
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI assistants (Claude Code, Claude Desktop, etc.) direct access to **IBM SPSS Statistics** for statistical analysis.
 
-Ask your AI assistant in plain language — SPSS-MCP translates the request into SPSS syntax, runs it against the real SPSS engine, and returns Markdown-formatted results.
+Describe your analysis in plain language — SPSS-MCP translates it into SPSS syntax, runs it against the real SPSS engine, and returns Markdown-formatted results with persistent output files.
 
 ---
 
-## Features
+## Table of Contents
 
-- **33 statistical analysis tools** covering the full range of psychology and social science research methods
-- **Uses the real SPSS engine** — results are identical to what you'd get clicking through SPSS menus
-- **File-only mode** — read `.sav` metadata and preview data even without SPSS installed (via `pyreadstat`)
-- **Registry-backed cold-method support** — rarer methods now run through structured schemas, validated parameters, and syntax templates instead of ad-hoc generation
-- **Persistent artifacts** — every run saves a `.spv` viewer file and a `.sps` syntax file for auditing and reproducibility
-- **Auto-detects SPSS** via Windows registry; no manual path configuration needed in most cases
+- [Requirements](#requirements)
+- [Deployment](#deployment)
+  - [1. Clone & Install](#1-clone--install)
+  - [2. Verify Installation](#2-verify-installation)
+  - [3. Configure Environment](#3-configure-environment)
+  - [4. Connect to Claude Code](#4-connect-to-claude-code)
+  - [5. Install Claude Code Skills](#5-install-claude-code-skills)
+- [Output Files](#output-files)
+- [Available Tools](#available-tools)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
 
 ---
 
 ## Requirements
 
-| Requirement | Notes |
+| Item | Version / Notes |
 |---|---|
-| Windows 10/11 | SPSS XD API is Windows-only |
-| Python 3.10+ | |
-| IBM SPSS Statistics 20–31 | For analysis tools; file-only mode works without it |
+| OS | Windows 10 / 11 (SPSS XD API is Windows-only) |
+| Python | 3.10 or higher |
+| IBM SPSS Statistics | Version 20–31 — required for analysis tools; file-only mode works without it |
+| Claude Code | Any version with MCP support |
 
 ---
 
-## Installation
+## Deployment
 
-### 1. Clone and install
+### 1. Clone & Install
 
 ```bash
 git clone https://github.com/Exekiel179/SPSS-MCP.git
@@ -42,57 +48,98 @@ cd SPSS-MCP
 pip install -e .
 ```
 
-### 2. Verify
+> **Virtual environment (recommended)**
+> ```bash
+> python -m venv .venv
+> .venv\Scripts\activate
+> pip install -e .
+> ```
+
+---
+
+### 2. Verify Installation
 
 ```bash
 spss-mcp status
 ```
 
-Expected output (with SPSS installed):
+Expected output when SPSS is installed and detected:
 
 ```
 pyreadstat : ✓ 1.2.x
 pandas     : ✓ 2.x.x
 SPSS       : ✓ C:\Program Files\IBM\SPSS Statistics\31\stats.exe
-SPSS Python: ✓ ...Python3\python.exe
+SPSS Python: ✓ C:\Program Files\IBM\SPSS Statistics\31\Python3\python.exe
 ```
 
-### 3. (Optional) Configure
+If SPSS shows `✗`, see [Troubleshooting](#troubleshooting).
 
-Copy `.env.example` to `.env` and adjust if auto-detection doesn't find your SPSS:
+---
+
+### 3. Configure Environment
+
+Copy the example config and edit as needed:
 
 ```bash
 copy .env.example .env
 ```
 
-Relevant settings:
+`.env` options:
 
 ```ini
-# Explicit SPSS install path (skip if auto-detect works)
-SPSS_INSTALL_PATH=C:\Program Files\IBM\SPSS Statistics\31
+# Explicit SPSS install path — only needed if auto-detection fails
+# SPSS_INSTALL_PATH=C:\Program Files\IBM\SPSS Statistics\31
 
-# Timeout for long-running analyses (seconds)
-SPSS_TIMEOUT=120
+# Temporary work files directory (default: %TEMP%\spss-mcp)
+# SPSS_TEMP_DIR=%TEMP%\spss-mcp
 
-# Force file-only mode (no SPSS execution)
-# SPSS_NO_SPSS=1
+# Persistent output directory for .spv and .sps files (default: %TEMP%\spss-mcp\results)
+# SPSS_RESULTS_DIR=%TEMP%\spss-mcp\results
+
+# Timeout per analysis job in seconds (default: 120)
+# SPSS_TIMEOUT=120
+
+# Force file-only mode even if SPSS is installed (default: 0)
+# SPSS_NO_SPSS=0
 ```
+
+> Most settings have sensible defaults. You only need `.env` if auto-detection fails or you want to change output locations.
 
 ---
 
-## Connect to Claude Code
+### 4. Connect to Claude Code
 
-### Automatic (recommended)
+#### Option A — Claude Code (`settings.json`)
 
-```bash
-spss-mcp setup-info
+Open Claude Code settings (`Ctrl+,`) and add the `mcpServers` block:
+
+```json
+{
+  "mcpServers": {
+    "spss": {
+      "command": "spss-mcp",
+      "args": ["serve", "--transport", "stdio"]
+    }
+  }
+}
 ```
 
-This prints a ready-to-paste JSON snippet for your Claude Code `settings.json`.
+If using a virtual environment, use the full path to the executable:
 
-### Manual
+```json
+{
+  "mcpServers": {
+    "spss": {
+      "command": "C:\\path\\to\\SPSS-MCP\\.venv\\Scripts\\spss-mcp.exe",
+      "args": ["serve", "--transport", "stdio"]
+    }
+  }
+}
+```
 
-Add to `%APPDATA%\Claude\claude_desktop_config.json` (Claude Desktop) or your Claude Code `settings.json`:
+#### Option B — Claude Desktop (`claude_desktop_config.json`)
+
+File location: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -109,51 +156,120 @@ Add to `%APPDATA%\Claude\claude_desktop_config.json` (Claude Desktop) or your Cl
 }
 ```
 
-Restart Claude Code / Claude Desktop. You should see **spss** in the connected MCP servers list.
+After saving, **restart Claude Code / Claude Desktop**. The `spss` server should appear in the connected MCP servers list.
+
+To get a ready-to-paste snippet for your specific setup:
+
+```bash
+spss-mcp setup-info
+```
 
 ---
 
-## Usage Examples
+### 5. Install Claude Code Skills
 
-Once connected, just describe what you want in plain language:
+This repository includes two Claude Code skills that make SPSS-MCP significantly more reliable. Install them by copying the `skills/` directory into your Claude Code skills folder.
 
-> "Run a reliability analysis on items q1 through q20 in `survey.sav`"
+#### What the skills do
 
-> "Check if the age variable is normally distributed, then run an independent-samples t-test comparing scores by group"
+| Skill | Activates | Purpose |
+|---|---|---|
+| `spss-analyst` | Automatically on every SPSS tool call | Writes syntax, executes analyses, archives output |
+| `spss-mcp-guard` | Automatically on every SPSS tool call | Catches known failure patterns before they cause silent errors |
 
-> "Fit a mixed-effects model with random intercepts for participant ID, predicting anxiety from time and condition"
+**`spss-analyst`** follows an 8-step defensive workflow:
 
-SPSS-MCP will call the right tools, execute the SPSS syntax, and return the results as formatted tables.
+```
+1. Check capabilities (spss_check_status)
+2. Explore data (spss_file_summary / spss_read_metadata)
+3. Smoke test for unfamiliar procedures
+4. Write SPSS syntax following conventions
+5. Execute with the appropriate MCP tool
+6. Parse warnings, not just success flags
+7. Interpret results in plain language
+8. Archive output → spss_result/ in working directory  ←  automatic
+```
+
+After every analysis, the skill automatically saves:
+
+```
+spss_result/
+├── 01_descriptives.sps     ← annotated syntax (Chinese header + English SPSS commands)
+├── 01_descriptives.spv     ← SPSS Viewer output (open in IBM SPSS for full charts)
+├── 02_regression.sps
+├── 02_regression.spv
+└── NN_<type>.*             ← globally-incrementing sequence number
+```
+
+**`spss-mcp-guard`** catches failure patterns documented in `skills/spss-mcp-guard/references/failure-patterns.md` — invalid subcommand keywords, timeout vs. syntax ambiguity, stale `.env` state, `success=True` with embedded warnings, and advanced procedure incompatibilities.
+
+#### Installation
+
+**Windows (Command Prompt):**
+
+```cmd
+set SKILLS_DIR=%USERPROFILE%\.claude\skills
+
+xcopy /E /I skills\spss-analyst "%SKILLS_DIR%\spss-analyst"
+xcopy /E /I skills\spss-mcp-guard "%SKILLS_DIR%\spss-mcp-guard"
+```
+
+**Windows (PowerShell):**
+
+```powershell
+$skillsDir = "$env:USERPROFILE\.claude\skills"
+
+Copy-Item -Recurse -Force skills\spss-analyst  "$skillsDir\spss-analyst"
+Copy-Item -Recurse -Force skills\spss-mcp-guard "$skillsDir\spss-mcp-guard"
+```
+
+**Verify:**
+
+```
+%USERPROFILE%\.claude\skills\
+├── spss-analyst\
+│   ├── SKILL.md
+│   └── references\
+│       ├── spss-syntax.md
+│       ├── spss-mcp-tools.md
+│       └── failure-patterns.md
+└── spss-mcp-guard\
+    ├── SKILL.md
+    └── references\
+        └── failure-patterns.md
+```
+
+Restart Claude Code after copying. Both skills activate automatically — no slash command needed.
 
 ---
 
-## Support Levels
+## Output Files
 
-SPSS-MCP now exposes four practical support tiers:
+Every analysis produces two persistent files:
 
-| Tier | Meaning |
+| File | Description |
 |---|---|
-| File-only | Reads `.sav` metadata/data without IBM SPSS |
-| Stable tool | Common analyses backed by dedicated MCP tools |
-| Registry-backed | Colder methods backed by schemas, validation, and syntax templates |
-| Experimental syntax | Anything reachable via `spss_run_syntax`, primarily dependent on model-authored syntax |
+| `.spv` | SPSS Viewer file — open in IBM SPSS Statistics for full formatted tables, charts, and plots |
+| `.sps` | SPSS syntax file — the exact syntax that ran, with a header documenting variables, parameters, and date |
 
-Registry-backed methods can also be introspected before execution with:
-- `spss_list_supported_methods`
-- `spss_get_method_schema`
-- `spss_get_method_support`
+**Default location** (without skills installed): `%TEMP%\spss-mcp\results\`
+
+**With `spss-analyst` skill installed**: automatically copied to `spss_result/NN_<type>.*` in your current working directory after every analysis.
 
 ---
 
-## Available Tools (36 total)
+## Available Tools
+
+36 tools across 8 categories.
 
 ### File & Data (9)
+
 | Tool | Description |
 |---|---|
 | `spss_check_status` | Check server capabilities and SPSS version |
-| `spss_list_supported_methods` | List registry-backed cold methods and their support tags |
-| `spss_get_method_schema` | Inspect a registry-backed method schema for orchestration |
-| `spss_get_method_support` | Inspect support metadata and coverage assertions for a method |
+| `spss_list_supported_methods` | List registry-backed methods with support tags |
+| `spss_get_method_schema` | Inspect a method's parameter schema |
+| `spss_get_method_support` | Inspect coverage assertions for a method |
 | `spss_list_files` | List `.sav` / `.zsav` files in a directory |
 | `spss_list_variables` | List variables with labels (searchable) |
 | `spss_read_metadata` | Read variable types, labels, value labels |
@@ -161,6 +277,7 @@ Registry-backed methods can also be introspected before execution with:
 | `spss_file_summary` | Case count, variable count, basic stats |
 
 ### Basic Statistics (9)
+
 | Tool | Description |
 |---|---|
 | `spss_frequencies` | Frequency tables with optional statistics |
@@ -170,81 +287,102 @@ Registry-backed methods can also be introspected before execution with:
 | `spss_anova` | One-way ANOVA with post-hoc (Tukey, Bonferroni, LSD) |
 | `spss_correlations` | Pearson / Spearman correlation matrix |
 | `spss_regression` | Linear regression (ENTER, stepwise, etc.) |
-| `spss_normality_outliers` | Shapiro-Wilk, K-S tests + outlier detection |
+| `spss_normality_outliers` | Shapiro-Wilk, K-S + outlier detection |
 | `spss_nonparametric_tests` | Mann-Whitney U, Wilcoxon, Kruskal-Wallis |
 
 ### Advanced Regression & GLM (3)
+
 | Tool | Description |
 |---|---|
-| `spss_logistic_regression` | Binary / multinomial logistic regression — registry-backed |
-| `spss_ordinal_regression` | Ordinal regression (PLUM) — registry-backed |
-| `spss_genlin` | Generalized linear models (Poisson, Gamma, etc.) — registry-backed |
+| `spss_logistic_regression` | Binary / multinomial logistic regression |
+| `spss_ordinal_regression` | Ordinal regression (PLUM) |
+| `spss_genlin` | Generalized linear models (Poisson, Gamma, etc.) |
 
 ### Multilevel & Mixed Models (2)
+
 | Tool | Description |
 |---|---|
-| `spss_mixed` | Linear mixed-effects models with random effects — registry-backed |
-| `spss_genlinmixed` | Generalized linear mixed models (GLMM) — registry-backed |
+| `spss_mixed` | Linear mixed-effects models with random effects |
+| `spss_genlinmixed` | Generalized linear mixed models (GLMM) |
 
 ### Survival Analysis (2)
+
 | Tool | Description |
 |---|---|
-| `spss_cox_regression` | Cox proportional hazards regression — registry-backed |
-| `spss_kaplan_meier` | Kaplan-Meier curves with log-rank test — registry-backed |
+| `spss_cox_regression` | Cox proportional hazards regression |
+| `spss_kaplan_meier` | Kaplan-Meier curves with log-rank test |
 
 ### Multivariate Analysis (5)
+
 | Tool | Description |
 |---|---|
 | `spss_factor` | Exploratory factor analysis (PCA / PAF + rotation) |
-| `spss_discriminant` | Discriminant analysis — registry-backed |
-| `spss_manova` | Multivariate ANOVA — registry-backed |
-| `spss_glm_univariate` | Univariate GLM with factorial designs and EMMs — registry-backed |
-| `spss_repeated_measures_anova` | Repeated measures ANOVA + Greenhouse-Geisser |
+| `spss_discriminant` | Discriminant analysis |
+| `spss_manova` | Multivariate ANOVA |
+| `spss_glm_univariate` | Univariate GLM with factorial designs and estimated marginal means |
+| `spss_repeated_measures_anova` | Repeated measures ANOVA with Greenhouse-Geisser correction |
 
 ### Clustering (2)
+
 | Tool | Description |
 |---|---|
-| `spss_cluster_hierarchical` | Hierarchical clustering with dendrogram — registry-backed |
-| `spss_twostep_cluster` | Two-step cluster analysis (auto cluster count) — registry-backed |
+| `spss_cluster_hierarchical` | Hierarchical clustering with dendrogram |
+| `spss_twostep_cluster` | Two-step cluster analysis (automatic cluster count) |
 
 ### Reliability & Scale (2)
-| Tool | Description |
-|---|---|
-| `spss_reliability_alpha` | Cronbach's α + item-deleted statistics |
-| `spss_compute_scale_score` | Scale scores (SUM / MEAN + reverse coding) |
 
-### Utility (2)
 | Tool | Description |
 |---|---|
+| `spss_reliability_alpha` | Cronbach's α with item-deleted statistics |
+| `spss_compute_scale_score` | Scale scores (SUM / MEAN with reverse coding) |
+
+### Utility (3)
+
+| Tool | Description |
+|---|---|
+| `spss_import_csv` | Import CSV to `.sav` format (no SPSS required) |
 | `spss_run_syntax` | Execute arbitrary SPSS syntax |
 | `spss_validate_syntax` | Validate syntax without running it |
 
 ---
 
-## Output Files
-
-Each analysis saves two files to `SPSS_RESULTS_DIR` (default: `%TEMP%\spss-mcp\results\`):
-
-| File | Description |
-|---|---|
-| `*.spv` | SPSS Viewer file — open in IBM SPSS Statistics for full formatted output |
-| `*.sps` | SPSS syntax file — the exact syntax that was run (for reproducibility) |
-
----
-
 ## Troubleshooting
 
-**SPSS not detected**
+**SPSS not detected — `spss-mcp status` shows ✗**
 
-Run `spss-mcp status` to see what paths were searched. Set `SPSS_INSTALL_PATH` explicitly in `.env` if needed.
+Set the path explicitly in `.env`:
+```ini
+SPSS_INSTALL_PATH=C:\Program Files\IBM\SPSS Statistics\31
+```
+Restart the MCP server after saving.
 
-**Timeout errors on large datasets**
+**Analysis times out**
 
-Increase `SPSS_TIMEOUT` in `.env` (e.g., `SPSS_TIMEOUT=300`).
+Increase the timeout in `.env`:
+```ini
+SPSS_TIMEOUT=300
+```
 
-**File-only mode only**
+**`success=True` but results look wrong or incomplete**
 
-Without IBM SPSS Statistics installed, only the 6 file & data tools work. Analysis tools return an error message explaining this.
+SPSS sometimes returns success with embedded warning blocks that contain the real error. Check the raw output for `Warning` or `Execution of this command stops` lines. The `spss-mcp-guard` skill catches the most common cases automatically.
+
+**File-only mode — analysis tools not working**
+
+Without IBM SPSS Statistics installed, only the 9 File & Data tools work. Install SPSS and re-run `spss-mcp status` to confirm detection.
+
+**Skills not activating in Claude Code**
+
+Verify the folders exist:
+```
+%USERPROFILE%\.claude\skills\spss-analyst\SKILL.md
+%USERPROFILE%\.claude\skills\spss-mcp-guard\SKILL.md
+```
+Restart Claude Code after copying the skill folders.
+
+**`spss_result/` not being created**
+
+The output archiving is handled by the `spss-analyst` skill. Confirm the skill is installed (see above) and that Claude Code has been restarted since installation.
 
 ---
 
@@ -254,12 +392,16 @@ Without IBM SPSS Statistics installed, only the 6 file & data tools work. Analys
 # Compile check
 python -m compileall src/spss_mcp
 
-# Run tests
+# Run test suite
 pytest
 
-# Run CLI
-spss-mcp status
-spss-mcp setup-info
+# Format
+black src/ tests/
+isort src/ tests/
+
+# CLI
+spss-mcp status       # environment check
+spss-mcp setup-info   # print MCP config snippet for Claude Code / Claude Desktop
 ```
 
 ---
