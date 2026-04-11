@@ -1,32 +1,18 @@
 """
 SPSS execution engine using IBM SPSS Statistics XD API.
 
-Runs SPSS syntax headlessly via SPSS's own Python3 (XD API) as a subprocess,
-injecting OMS commands to capture output as readable text instead of .spv binary.
+Submits syntax to the persistent SpssEngine (spss_engine.py), which keeps a
+single SPSS Python3 process alive across all tool calls to avoid repeated
+~30-60 s SPSS startup overhead.  OMS commands capture output as readable text.
 """
 
 import asyncio
-import os
-import subprocess
-import sys
 import uuid
 from pathlib import Path
 from typing import Optional
 
-from spss_mcp.config import get_results_dir, get_spss_executable, get_temp_dir, get_timeout
+from spss_mcp.config import get_results_dir, get_spss_executable, get_spss_python, get_temp_dir, get_timeout
 from spss_mcp.output_parser import parse_spss_output
-
-
-def get_spss_python() -> str | None:
-    """Return path to the SPSS Python3 executable bundled with SPSS."""
-    stats_exe = get_spss_executable()
-    if not stats_exe:
-        return None
-    spss_home = str(Path(stats_exe).parent)
-    python_exe = Path(spss_home) / "Python3" / "python.exe"
-    if python_exe.exists():
-        return str(python_exe)
-    return None
 
 
 def _build_execution_syntax(
@@ -85,60 +71,6 @@ def _build_full_syntax(
     )
 
 
-def _make_runner_script(
-    spss_home: str,
-    full_syntax: str,
-    output_file: str,
-    viewer_file: str | None = None,
-) -> str:
-    """
-    Generate the Python script that runs inside SPSS Python3 via XD API.
-    The script starts the SPSS backend, submits OMS-wrapped syntax, writes output, then exits.
-    """
-
-    # Write the syntax and paths to a separate data file to avoid quoting hell
-    # The runner script reads them back at runtime using paths injected as raw strings
-    spss_home_r = repr(spss_home)
-    output_file_r = repr(output_file)
-    viewer_file_r = repr(viewer_file)
-    syntax_r = repr(full_syntax)
-
-    lines = [
-        "import sys, os",
-        f"SPSS_HOME = {spss_home_r}",
-        'os.environ["PATH"] = SPSS_HOME + os.pathsep + os.environ.get("PATH", "")',
-        'sys.path.insert(0, os.path.join(SPSS_HOME, "Python3", "Lib", "site-packages"))',
-        "import spss",
-        f"syntax = {syntax_r}",
-        f"output_file = {output_file_r}",
-        f"viewer_file = {viewer_file_r}",
-        "try:",
-        "    spss.StartSPSS()",
-        "except Exception as e:",
-        '    print(f"__spss_error__={e}", file=sys.stderr)',
-        "    sys.exit(1)",
-        "try:",
-        "    spss.Submit(syntax)",
-        "except spss.SpssError as e:",
-        '    print(f"__spss_warn__={e}", file=sys.stderr)',
-        "except Exception as e:",
-        '    print(f"__spss_error__={e}", file=sys.stderr)',
-        "    sys.exit(2)",
-        "if viewer_file:",
-        "    if os.path.exists(viewer_file):",
-        '        print("__spss_viewer_ok__")',
-        "    else:",
-        '        print("__spss_viewer_missing__", file=sys.stderr)',
-        "last_err = spss.GetLastErrorLevel()",
-        'print(f"__spss_err_level__={last_err}")',
-        "if os.path.exists(output_file):",
-        '    print("__spss_ok__")',
-        "else:",
-        '    print("__spss_no_output__", file=sys.stderr)',
-    ]
-    return "\n".join(lines) + "\n"
-
-
 async def run_syntax(
     syntax: str,
     data_file: Optional[str] = None,
@@ -148,7 +80,10 @@ async def run_syntax(
     select_if: Optional[str] = None,
 ) -> dict:
     """
-    Execute SPSS syntax via the XD API (SPSS Python3 subprocess) and return structured result.
+    Execute SPSS syntax via the persistent engine and return a structured result.
+
+    The engine is started once (on first call or after a crash) and reused for
+    all subsequent calls, eliminating the ~30-60 s SPSS startup overhead.
 
     Returns:
         {
@@ -157,6 +92,7 @@ async def run_syntax(
             "output_raw": str,
             "error": str | None,
             "warnings": list[str],
+            ...
         }
     """
     stats_exe = get_spss_executable()
@@ -178,8 +114,7 @@ async def run_syntax(
             "warnings": [],
         }
 
-    spss_python = get_spss_python()
-    if not spss_python:
+    if not get_spss_python():
         return {
             "success": False,
             "timed_out": False,
@@ -196,22 +131,16 @@ async def run_syntax(
             "warnings": [],
         }
 
-    spss_home = str(Path(stats_exe).parent)
     run_id = uuid.uuid4().hex[:12]
     temp_dir = get_temp_dir()
     results_dir = get_results_dir()
-    runner_script = temp_dir / f"spss_run_{run_id}.py"
     output_file = temp_dir / f"spss_out_{run_id}.txt"
     syntax_file = results_dir / f"spss_syntax_{run_id}.sps" if save_syntax_file else None
     viewer_file = results_dir / f"spss_viewer_{run_id}.spv" if save_viewer_output else None
 
-    execution_syntax = _build_execution_syntax(
-        syntax=syntax,
-        data_file=data_file,
-    )
+    execution_syntax = _build_execution_syntax(syntax=syntax, data_file=data_file)
     selection_syntax = _build_selection_syntax(
-        filter_variable=filter_variable,
-        select_if=select_if,
+        filter_variable=filter_variable, select_if=select_if
     )
     if selection_syntax:
         execution_syntax = execution_syntax.replace("\n", "\n" + selection_syntax, 1)
@@ -221,176 +150,96 @@ async def run_syntax(
         viewer_file=str(viewer_file) if viewer_file else None,
     )
 
-    script_content = _make_runner_script(
-        spss_home=spss_home,
+    if syntax_file:
+        syntax_file.write_text(execution_syntax, encoding="utf-8")
+
+    # ── Submit to persistent engine ───────────────────────────────────────────
+    from spss_mcp.spss_engine import get_engine
+    engine_result = await get_engine().submit(
         full_syntax=full_syntax,
         output_file=str(output_file),
         viewer_file=str(viewer_file) if viewer_file else None,
     )
 
-    try:
-        if syntax_file:
-            syntax_file.write_text(execution_syntax, encoding="utf-8")
-        runner_script.write_text(script_content, encoding="utf-8")
+    err_level = engine_result.get("err_level", 0)
+    fatal_error = engine_result.get("error")
+    warn_msg = engine_result.get("warn")
+    viewer_ok = engine_result.get("viewer_ok", False)
+    output_exists = engine_result.get("output_exists", False)
+    timed_out = engine_result.get("timed_out", False)
 
-        def _run_subprocess():
-            env = os.environ.copy()
-            env["PATH"] = spss_home + os.pathsep + env.get("PATH", "")
-            return subprocess.run(
-                [spss_python, str(runner_script)],
-                capture_output=True,
-                text=True,
-                timeout=get_timeout(),
-                env=env,
-            )
-
+    # ── Read OMS output file ──────────────────────────────────────────────────
+    raw_output = ""
+    if output_file.exists():
+        raw_output = output_file.read_text(encoding="utf-8-sig", errors="replace")
         try:
-            proc = await asyncio.to_thread(_run_subprocess)
-        except subprocess.TimeoutExpired:
-            return {
-                "success": False,
-                "timed_out": True,
-                "last_error_level": 0,
-                "process_returncode": None,
-                "parsed_errors": [],
-                "parsed_warnings": [],
-                "output_markdown": "",
-                "output_raw": "",
-                "error": (
-                    f"SPSS job exceeded the {get_timeout()} second timeout. "
-                    "Simplify the analysis or increase SPSS_TIMEOUT."
-                ),
-                "warnings": [],
-            }
-        except FileNotFoundError as e:
-            return {
-                "success": False,
-                "timed_out": False,
-                "last_error_level": 0,
-                "process_returncode": None,
-                "parsed_errors": [],
-                "parsed_warnings": [],
-                "output_markdown": "",
-                "output_raw": "",
-                "error": f"SPSS Python3 not found: {e}",
-                "warnings": [],
-            }
+            output_file.unlink()
+        except OSError:
+            pass
 
-        stdout_text = proc.stdout or ""
-        stderr_text = (proc.stderr or "").strip()
+    from spss_mcp.output_parser import extract_errors, extract_warnings
+    parsed_errors = extract_errors(raw_output) if raw_output else []
+    parsed_warnings = extract_warnings(raw_output) if raw_output else []
 
-        # Detect success
-        ok_signal = "__spss_ok__" in stdout_text
-        viewer_ok_signal = "__spss_viewer_ok__" in stdout_text
+    has_fatal_error = err_level >= 3 or bool(fatal_error and not warn_msg)
+    success = output_exists and bool(raw_output) and not has_fatal_error and not timed_out
 
-        err_signal = "__spss_error__" in stderr_text
-        warn_signal = "__spss_warn__" in stderr_text
-        no_output = "__spss_no_output__" in stderr_text
-        viewer_missing_signal = "__spss_viewer_missing__" in stderr_text
-        viewer_err_signal = "__spss_viewer_error__" in stderr_text
+    markdown = parse_spss_output(raw_output) if raw_output else "_No output produced._"
+    warnings: list[str] = list(parsed_warnings)
 
-        last_error_level = 0
-        for line in stdout_text.splitlines():
-            if line.startswith("__spss_err_level__="):
-                try:
-                    last_error_level = int(line.split("=", 1)[1].strip())
-                except ValueError:
-                    last_error_level = 0
-                break
+    if warn_msg and success:
+        warnings.append(warn_msg)
+        markdown += f"\n\n> **Note:** {warn_msg}"
 
-        # Read OMS output file
-        raw_output = ""
-        if output_file.exists():
-            raw_output = output_file.read_text(encoding="utf-8-sig", errors="replace")
-        if not raw_output and stderr_text:
-            raw_output = stderr_text
+    viewer_error = None
+    if save_viewer_output and viewer_file and not viewer_ok:
+        viewer_error = "SPSS did not save viewer output (.spv)."
 
-        from spss_mcp.output_parser import extract_errors, extract_warnings
+    error_msg = None
+    if not success:
+        if timed_out:
+            error_msg = f"SPSS job exceeded the {get_timeout()} second timeout. Simplify the analysis or increase SPSS_TIMEOUT."
+        elif fatal_error:
+            error_msg = fatal_error
+        elif err_level >= 3:
+            error_msg = "; ".join(parsed_errors) if parsed_errors else f"SPSS reported fatal error level {err_level}"
+        elif not output_exists:
+            error_msg = "SPSS ran but produced no output file."
+        else:
+            error_msg = "SPSS did not confirm successful completion."
 
-        parsed_errors = extract_errors(raw_output) if raw_output else []
-        parsed_warnings = extract_warnings(raw_output) if raw_output else []
-        has_fatal_error = last_error_level >= 3 or err_signal
+    viewer_output_file = str(viewer_file) if viewer_ok and viewer_file and viewer_file.exists() else None
+    syntax_output_file = str(syntax_file) if syntax_file and syntax_file.exists() else None
 
-        success = (
-            ok_signal
-            and bool(raw_output)
-            and proc.returncode == 0
-            and not has_fatal_error
-        )
+    if viewer_error:
+        warnings.append(viewer_error)
+        markdown += f"\n\n> **Viewer save note:** {viewer_error}"
 
-        markdown = parse_spss_output(raw_output) if raw_output else "_No output produced._"
+    # ── Open .spv in SPSS Statistics Viewer ──────────────────────────────────
+    if viewer_output_file:
+        import os as _os
+        import sys as _sys
+        try:
+            if _sys.platform == "win32":
+                _os.startfile(viewer_output_file)
+        except Exception:
+            pass  # non-fatal: result is still returned even if open fails
 
-        warnings: list[str] = list(parsed_warnings)
-
-        # Append any SPSS-level warnings to the markdown output
-        if warn_signal and success:
-            warn_text = "\n".join(
-                line.replace("__spss_warn__=", "").strip()
-                for line in stderr_text.splitlines()
-                if "__spss_warn__" in line
-            )
-            if warn_text:
-                warnings.append(warn_text)
-                markdown += f"\n\n> **Note:** {warn_text}"
-
-        viewer_error = None
-        if save_viewer_output:
-            if viewer_err_signal:
-                viewer_error = "\n".join(
-                    line.replace("__spss_viewer_error__=", "").strip()
-                    for line in stderr_text.splitlines()
-                    if "__spss_viewer_error__" in line
-                ) or "SPSS failed to save viewer output (.spv)."
-            elif viewer_missing_signal:
-                viewer_error = "SPSS reported viewer save but .spv file was not found."
-
-        error_msg = None
-        if not success:
-            if last_error_level >= 3:
-                fatal_details = "; ".join(parsed_errors) if parsed_errors else f"SPSS reported fatal error level {last_error_level}"
-                error_msg = fatal_details
-            elif err_signal:
-                error_msg = stderr_text.replace("__spss_error__=", "SPSS error: ")
-            elif no_output:
-                error_msg = "SPSS ran but produced no output file."
-            elif proc.returncode != 0:
-                error_msg = stderr_text or f"SPSS process exited with code {proc.returncode}"
-            elif not ok_signal:
-                error_msg = "SPSS did not confirm successful completion."
-
-        viewer_output_file = None
-        if save_viewer_output and viewer_file and viewer_file.exists() and viewer_ok_signal:
-            viewer_output_file = str(viewer_file)
-
-        syntax_output_file = str(syntax_file) if syntax_file and syntax_file.exists() else None
-
-        if viewer_error:
-            warnings.append(viewer_error)
-            markdown += f"\n\n> **Viewer save note:** {viewer_error}"
-
-        return {
-            "success": success,
-            "timed_out": False,
-            "last_error_level": last_error_level,
-            "process_returncode": proc.returncode,
-            "parsed_errors": parsed_errors,
-            "parsed_warnings": parsed_warnings,
-            "output_markdown": markdown,
-            "output_raw": raw_output,
-            "viewer_output_file": viewer_output_file,
-            "syntax_file": syntax_output_file,
-            "viewer_error": viewer_error,
-            "error": error_msg,
-            "warnings": warnings,
-        }
-
-    finally:
-        for f in (runner_script, output_file):
-            try:
-                if f.exists():
-                    f.unlink()
-            except OSError:
-                pass
+    return {
+        "success": success,
+        "timed_out": timed_out,
+        "last_error_level": err_level,
+        "process_returncode": 0 if success else 1,
+        "parsed_errors": parsed_errors,
+        "parsed_warnings": parsed_warnings,
+        "output_markdown": markdown,
+        "output_raw": raw_output,
+        "viewer_output_file": viewer_output_file,
+        "syntax_file": syntax_output_file,
+        "viewer_error": viewer_error,
+        "error": error_msg,
+        "warnings": warnings,
+    }
 
 
 def _has_fatal_error(text: str) -> bool:
@@ -512,7 +361,7 @@ def build_anova_syntax(
     ph_line = ""
     if post_hoc:
         ph_str = " ".join(p.upper() for p in post_hoc)
-        ph_line = f"  /POSTHOC={factor} ({ph_str})\n"
+        ph_line = f"  /POSTHOC={ph_str}\n"
     return (
         f"GET FILE='{file_path}'.\n"
         f"ONEWAY {dependent} BY {factor}\n"

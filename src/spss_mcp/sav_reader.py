@@ -64,6 +64,45 @@ async def read_data(
     return {"dataframe": df, "meta": meta}
 
 
+async def import_csv_to_sav(
+    csv_path: str,
+    output_path: Optional[str] = None,
+    encoding: str = "utf-8",
+    delimiter: str = ",",
+    column_labels: Optional[dict] = None,
+) -> dict:
+    """
+    Convert a CSV file to SPSS .sav format using pandas + pyreadstat.
+    Does not require IBM SPSS Statistics to be installed.
+
+    Returns a dict with keys: output_path, n_rows, n_cols, column_names.
+    """
+    import pandas as pd
+
+    csv_p = Path(csv_path)
+    if not csv_p.exists():
+        raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+    if output_path is None:
+        output_path = str(csv_p.with_suffix(".sav"))
+
+    def _convert():
+        df = pd.read_csv(csv_p, encoding=encoding, sep=delimiter)
+        write_kwargs: dict = {}
+        if column_labels:
+            write_kwargs["column_labels"] = column_labels
+        pyreadstat.write_sav(df, output_path, **write_kwargs)
+        return df.shape[0], df.shape[1], list(df.columns)
+
+    n_rows, n_cols, col_names = await asyncio.to_thread(_convert)
+    return {
+        "output_path": output_path,
+        "n_rows": n_rows,
+        "n_cols": n_cols,
+        "column_names": col_names,
+    }
+
+
 async def get_file_summary(file_path: str) -> dict:
     """Compute a quick summary: case count, variable count, descriptive stats."""
     def _read():

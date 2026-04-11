@@ -116,6 +116,18 @@ def get_spss_executable() -> str | None:
     return None
 
 
+def get_spss_python() -> str | None:
+    """Return path to the SPSS Python3 executable bundled with SPSS."""
+    stats_exe = get_spss_executable()
+    if not stats_exe:
+        return None
+    from pathlib import Path
+    python_exe = Path(stats_exe).parent / "Python3" / "python.exe"
+    if python_exe.exists():
+        return str(python_exe)
+    return None
+
+
 def get_timeout() -> int:
     """Return SPSS batch timeout in seconds (default 120)."""
     try:

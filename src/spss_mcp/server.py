@@ -27,10 +27,26 @@ async def server_lifespan(server: FastMCP):
     sys.stderr.write(
         f"  pyreadstat : {'available v' + caps['pyreadstat_version'] if caps['pyreadstat'] else 'NOT FOUND'}\n"
     )
-    sys.stderr.write(
-        f"  SPSS batch : {'available — ' + caps['spss_path'] if caps['spss'] else 'NOT FOUND (file-only mode)'}\n"
-    )
-    yield {"capabilities": caps}
+
+    engine_status = "not started"
+    if caps.get("spss"):
+        sys.stderr.write(f"  SPSS found : {caps['spss_path']}\n")
+        sys.stderr.write("  Launching persistent SPSS engine...\n")
+        from spss_mcp.spss_engine import get_engine
+        ok, msg = await get_engine().ensure_started()
+        engine_status = "ready" if ok else f"failed — {msg}"
+        sys.stderr.write(f"  SPSS engine: {engine_status}\n")
+    else:
+        sys.stderr.write("  SPSS batch : NOT FOUND (file-only mode)\n")
+
+    yield {"capabilities": caps, "engine_status": engine_status}
+
+    if caps.get("spss"):
+        sys.stderr.write("  Stopping SPSS engine...\n")
+        from spss_mcp.spss_engine import get_engine
+        await get_engine().stop()
+        sys.stderr.write("  SPSS engine stopped.\n")
+
     sys.stderr.write("Shutting down SPSS MCP server.\n")
 
 
@@ -201,14 +217,27 @@ async def spss_check_status(ctx: Context) -> str:
         from spss_mcp._version import __version__
         caps = detect_capabilities()
         runtime = get_runtime_config()
+
+        # Engine live status
+        engine_alive = False
+        if caps.get("spss"):
+            from spss_mcp.spss_engine import get_engine
+            engine_alive = get_engine().is_alive()
+
+        engine_cell = (
+            "✅ Running" if engine_alive
+            else ("⚠️ Stopped (will auto-restart on next call)" if caps.get("spss") else "❌ N/A")
+        )
+
         lines = [
             f"# SPSS MCP Server Status (v{__version__})\n",
             "## Capabilities\n",
-            f"| Capability | Status |",
-            f"|---|---|",
+            "| Capability | Status |",
+            "|---|---|",
             f"| pyreadstat (.sav file I/O) | {'✅ v' + caps['pyreadstat_version'] if caps['pyreadstat'] else '❌ Not installed'} |",
             f"| pandas | {'✅ v' + caps['pandas_version'] if caps['pandas_version'] else '❌ Not installed'} |",
-            f"| IBM SPSS Statistics (batch) | {'✅ Found' if caps['spss'] else '❌ Not found'} |",
+            f"| IBM SPSS Statistics | {'✅ Found' if caps['spss'] else '❌ Not found'} |",
+            f"| Persistent SPSS engine | {engine_cell} |",
             "",
         ]
         lines.append(f"**Effective timeout:** `{runtime['timeout']}` seconds")
@@ -390,6 +419,63 @@ async def spss_file_summary(
     except Exception as e:
         if ctx:
             await ctx.error(f"spss_file_summary error: {e}")
+        return f"Error: {e}"
+
+
+@mcp.tool(
+    name="spss_import_csv",
+    description=(
+        "Convert a CSV file to SPSS .sav format directly using pandas + pyreadstat — "
+        "no IBM SPSS Statistics installation required. "
+        "Much faster than going through SPSS syntax because it bypasses the SPSS engine entirely. "
+        "Saves the .sav file next to the CSV by default, or to a custom output_path."
+    ),
+)
+async def spss_import_csv(
+    csv_path: str,
+    output_path: Optional[str] = None,
+    encoding: str = "utf-8",
+    delimiter: str = ",",
+    column_labels: Optional[dict] = None,
+    ctx: Context = None,
+) -> str:
+    """
+    Parameters
+    ----------
+    csv_path : str
+        Full path to the source CSV file.
+    output_path : str, optional
+        Destination .sav file path. Defaults to the same directory as the CSV with .sav extension.
+    encoding : str, optional
+        CSV file encoding (default: utf-8).
+    delimiter : str, optional
+        Column delimiter (default: comma).
+    column_labels : dict, optional
+        Mapping of column names to SPSS variable labels, e.g. {"age": "Age of respondent"}.
+    """
+    try:
+        err = _require_pyreadstat(ctx)
+        if err:
+            return f"Error: {err}"
+
+        from spss_mcp.sav_reader import import_csv_to_sav
+        result = await import_csv_to_sav(
+            csv_path=csv_path,
+            output_path=output_path,
+            encoding=encoding,
+            delimiter=delimiter,
+            column_labels=column_labels,
+        )
+        lines = [
+            f"CSV imported successfully to `{result['output_path']}`",
+            f"- Rows: {result['n_rows']}",
+            f"- Variables: {result['n_cols']}",
+            f"- Columns: {', '.join(result['column_names'])}",
+        ]
+        return "\n".join(lines)
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"spss_import_csv error: {e}")
         return f"Error: {e}"
 
 
