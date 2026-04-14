@@ -37,3 +37,4 @@ oms_*.txt
 Thumbs.db
 .vscode/
 .idea/
+.claude/
