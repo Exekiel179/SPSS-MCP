@@ -9,7 +9,11 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gi
 
 Describe your analysis in plain language — SPSS-MCP translates it into SPSS syntax, runs it against the real SPSS engine, and returns Markdown-formatted results with persistent output files.
 
-> **🚀 新手？** 查看 [快速部署指南 (QUICK_START.md)](QUICK_START.md) 或直接运行 `install.bat` / `install.ps1` 一键安装
+> **🚀 新手快速开始：**
+> - [快速部署指南 (QUICK_START.md)](QUICK_START.md) - 3 步完成安装
+> - [连接配置教程 (SETUP_GUIDE.md)](SETUP_GUIDE.md) - 详细的连接步骤
+> - [连接流程图解 (CONNECTION_DIAGRAM.md)](CONNECTION_DIAGRAM.md) - 可视化架构说明
+> - 或直接运行 `install.bat` / `install.ps1` 一键安装
 
 ---
 
