@@ -26,6 +26,7 @@ Describe your analysis in plain language — SPSS-MCP translates it into SPSS sy
   - [3. Configure Environment](#3-configure-environment)
   - [4. Connect to Claude Code](#4-connect-to-claude-code)
   - [5. Install Claude Code Skills](#5-install-claude-code-skills)
+- [Configuration Management](#configuration-management)
 - [Output Files](#output-files)
 - [Available Tools](#available-tools)
 - [Troubleshooting](#troubleshooting)
@@ -260,6 +261,20 @@ Copy-Item -Recurse -Force skills\spss-mcp-guard "$skillsDir\spss-mcp-guard"
 ```
 
 Restart Claude Code after copying. Both skills activate automatically — no slash command needed.
+
+---
+
+## Configuration Management
+
+For detailed configuration options including global/local registration, environment variables, and advanced settings, see:
+
+📖 **[Configuration Management Guide (CONFIGURATION.md)](CONFIGURATION.md)**
+
+Quick links:
+- [Global vs Local Registration](CONFIGURATION.md#配置方式对比)
+- [Environment Variables](CONFIGURATION.md#环境变量配置)
+- [Multiple SPSS Versions](CONFIGURATION.md#示例-4多版本-spss-切换)
+- [Configuration Templates](CONFIGURATION.md#配置模板)
 
 ---
 
