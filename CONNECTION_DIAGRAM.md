@@ -53,7 +53,7 @@
 │   └── AppData\Roaming\Claude\
 │       └── claude_desktop_config.json  ← Claude Desktop 配置（如果使用）
 │
-├── F:\MCP\spss-mcp\               ← SPSS-MCP 项目目录
+├── <项目目录>\SPSS-MCP\           ← SPSS-MCP 项目目录
 │   ├── .env                       ← 环境配置（SPSS 路径等）
 │   ├── src\spss_mcp\              ← MCP 服务器代码
 │   └── skills\                    ← 技能源文件
