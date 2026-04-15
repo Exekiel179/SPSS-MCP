@@ -12,7 +12,6 @@ from spss_mcp.claude_config import (
     get_default_settings_path,
     get_entrypoint_config,
 )
-from spss_mcp.server import mcp
 
 
 def main():
@@ -115,6 +114,8 @@ def main():
         sys.exit(0)
 
     elif args.command == "serve":
+        from spss_mcp.server import mcp
+
         transport = getattr(args, "transport", "stdio")
         if transport == "stdio":
             mcp.run(transport="stdio")

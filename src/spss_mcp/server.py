@@ -28,24 +28,23 @@ async def server_lifespan(server: FastMCP):
         f"  pyreadstat : {'available v' + caps['pyreadstat_version'] if caps['pyreadstat'] else 'NOT FOUND'}\n"
     )
 
-    engine_status = "not started"
     if caps.get("spss"):
         sys.stderr.write(f"  SPSS found : {caps['spss_path']}\n")
-        sys.stderr.write("  Launching persistent SPSS engine...\n")
-        from spss_mcp.spss_engine import get_engine
-        ok, msg = await get_engine().ensure_started()
-        engine_status = "ready" if ok else f"failed — {msg}"
-        sys.stderr.write(f"  SPSS engine: {engine_status}\n")
+        sys.stderr.write("  SPSS engine: lazy start on first analysis request\n")
+        engine_status = "lazy start"
     else:
         sys.stderr.write("  SPSS batch : NOT FOUND (file-only mode)\n")
+        engine_status = "not available"
 
     yield {"capabilities": caps, "engine_status": engine_status}
 
     if caps.get("spss"):
-        sys.stderr.write("  Stopping SPSS engine...\n")
         from spss_mcp.spss_engine import get_engine
-        await get_engine().stop()
-        sys.stderr.write("  SPSS engine stopped.\n")
+        engine = get_engine()
+        if engine.is_alive():
+            sys.stderr.write("  Stopping SPSS engine...\n")
+            await engine.stop()
+            sys.stderr.write("  SPSS engine stopped.\n")
 
     sys.stderr.write("Shutting down SPSS MCP server.\n")
 
