@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from spss_mcp.config import detect_capabilities, get_timeout
+from spss_mcp.config import detect_capabilities, get_startup_timeout, get_timeout
 
 
 def get_entrypoint_config() -> tuple[str, list[str]]:
@@ -39,6 +39,7 @@ def build_mcp_server_config() -> dict:
         "env": {
             "SPSS_INSTALL_PATH": spss_install,
             "SPSS_TIMEOUT": str(get_timeout()),
+            "SPSS_STARTUP_TIMEOUT": str(get_startup_timeout()),
         },
     }
 

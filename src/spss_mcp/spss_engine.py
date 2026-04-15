@@ -18,7 +18,13 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from spss_mcp.config import get_spss_executable, get_spss_python, get_temp_dir, get_timeout
+from spss_mcp.config import (
+    get_spss_executable,
+    get_spss_python,
+    get_startup_timeout,
+    get_temp_dir,
+    get_timeout,
+)
 
 
 # ─── Engine subprocess script ─────────────────────────────────────────────────
@@ -133,6 +139,35 @@ class SpssEngine:
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._lock = asyncio.Lock()
 
+    async def _read_startup_diagnostics(self) -> str:
+        """Collect whatever stderr and exit information is available during startup failure."""
+        if not self._proc:
+            return ""
+
+        diagnostics: list[str] = []
+
+        try:
+            stderr_bytes = b""
+            if self._proc.stderr:
+                stderr_bytes = await asyncio.wait_for(self._proc.stderr.read(), timeout=1.5)
+            stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
+            if stderr_text:
+                diagnostics.append(f"stderr: {stderr_text}")
+        except Exception:
+            pass
+
+        try:
+            returncode = self._proc.returncode
+            if returncode is None:
+                await asyncio.wait_for(self._proc.wait(), timeout=1.5)
+                returncode = self._proc.returncode
+            if returncode is not None:
+                diagnostics.append(f"exit code: {returncode}")
+        except Exception:
+            pass
+
+        return "; ".join(diagnostics)
+
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
     def is_alive(self) -> bool:
@@ -180,20 +215,47 @@ class SpssEngine:
         except Exception as e:
             return False, f"Failed to launch SPSS process: {e}"
 
-        # SPSS startup can take up to ~60s; give it 120s to be safe
+        startup_timeout = get_startup_timeout()
+
         try:
-            line = await asyncio.wait_for(self._proc.stdout.readline(), timeout=120)
+            line = await asyncio.wait_for(self._proc.stdout.readline(), timeout=startup_timeout)
             decoded = line.decode("utf-8", errors="replace").strip()
         except asyncio.TimeoutError:
+            diagnostics = await self._read_startup_diagnostics()
             await self.stop()
-            return False, "SPSS engine startup timed out (>120 s)."
+            message = (
+                f"SPSS engine startup timed out after {startup_timeout} s. "
+                "Increase SPSS_STARTUP_TIMEOUT if SPSS launches slowly."
+            )
+            if diagnostics:
+                message += f" Diagnostics: {diagnostics}"
+            return False, message
+        except Exception as e:
+            diagnostics = await self._read_startup_diagnostics()
+            await self.stop()
+            message = f"SPSS engine startup failed while waiting for readiness: {e}"
+            if diagnostics:
+                message += f". Diagnostics: {diagnostics}"
+            return False, message
+
+        if not line:
+            diagnostics = await self._read_startup_diagnostics()
+            await self.stop()
+            message = "SPSS engine exited before signaling readiness."
+            if diagnostics:
+                message += f" Diagnostics: {diagnostics}"
+            return False, message
 
         if "__spss_ready__" in decoded:
             return True, "SPSS engine started and ready."
 
         err_detail = decoded.replace("__spss_error__=", "").strip() or decoded
+        diagnostics = await self._read_startup_diagnostics()
         await self.stop()
-        return False, f"SPSS engine failed to start: {err_detail}"
+        message = f"SPSS engine failed to start: {err_detail}"
+        if diagnostics:
+            message += f". Diagnostics: {diagnostics}"
+        return False, message
 
     async def stop(self):
         """Gracefully shut down the engine process."""

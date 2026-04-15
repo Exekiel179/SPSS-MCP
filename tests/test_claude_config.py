@@ -15,6 +15,7 @@ def test_configure_claude_settings_creates_new_settings_file(monkeypatch, tmp_pa
             "env": {
                 "SPSS_INSTALL_PATH": r"E:\spss",
                 "SPSS_TIMEOUT": "300",
+                "SPSS_STARTUP_TIMEOUT": "600",
             },
         },
     )
@@ -41,6 +42,7 @@ def test_configure_claude_settings_merges_existing_settings(monkeypatch, tmp_pat
             "env": {
                 "SPSS_INSTALL_PATH": r"E:\spss",
                 "SPSS_TIMEOUT": "300",
+                "SPSS_STARTUP_TIMEOUT": "600",
             },
         },
     )

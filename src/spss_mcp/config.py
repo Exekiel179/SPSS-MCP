@@ -128,19 +128,36 @@ def get_spss_python() -> str | None:
     return None
 
 
-def get_timeout() -> int:
-    """Return SPSS batch timeout in seconds (default 120)."""
+def _get_positive_int_env(name: str, default: int) -> int:
+    """Return a positive integer env var value or a default."""
     try:
-        timeout = int(os.environ.get("SPSS_TIMEOUT", "120"))
+        value = int(os.environ.get(name, str(default)))
     except ValueError:
-        return 120
-    return timeout if timeout > 0 else 120
+        return default
+    return value if value > 0 else default
+
+
+def get_timeout() -> int:
+    """Return SPSS analysis timeout in seconds (default 120)."""
+    return _get_positive_int_env("SPSS_TIMEOUT", 120)
+
+
+def get_startup_timeout() -> int:
+    """
+    Return SPSS engine startup timeout in seconds.
+
+    Startup is often slower than a normal analysis request because SPSS may need
+    to initialize licensing, Python integration, and the persistent XD engine.
+    Default to 300 seconds unless explicitly overridden.
+    """
+    return _get_positive_int_env("SPSS_STARTUP_TIMEOUT", 300)
 
 
 def get_runtime_config() -> dict:
     """Return the effective runtime configuration used for SPSS execution."""
     return {
         "timeout": get_timeout(),
+        "startup_timeout": get_startup_timeout(),
         "temp_dir": str(get_temp_dir()),
         "results_dir": str(get_results_dir()),
         "spss_path": get_spss_executable(),

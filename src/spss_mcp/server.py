@@ -240,6 +240,7 @@ async def spss_check_status(ctx: Context) -> str:
             "",
         ]
         lines.append(f"**Effective timeout:** `{runtime['timeout']}` seconds")
+        lines.append(f"**Engine startup timeout:** `{runtime['startup_timeout']}` seconds")
         lines.append(f"**Temp dir:** `{runtime['temp_dir']}`")
         lines.append(f"**Results dir:** `{runtime['results_dir']}`\n")
         if caps["spss"]:

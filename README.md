@@ -84,6 +84,16 @@ Create `.env` file:
 SPSS_INSTALL_PATH=C:\Program Files\IBM\SPSS Statistics\31
 ```
 
+### Slow SPSS startup?
+
+If SPSS itself launches slowly on your machine, increase the engine startup timeout:
+
+```ini
+SPSS_STARTUP_TIMEOUT=300
+```
+
+This is separate from `SPSS_TIMEOUT`, which controls the timeout for each analysis job after the engine is already running.
+
 ### Optional: Install Skills
 
 Skills make analysis more reliable and auto-save results:

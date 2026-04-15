@@ -93,6 +93,16 @@ SPSS_INSTALL_PATH=C:\Program Files\IBM\SPSS Statistics\31
 SPSS_TIMEOUT=300
 ```
 
+### SPSS 启动超时？
+
+如果是第一次启动 SPSS 引擎就超时，而不是分析过程超时，请单独增加启动超时：
+
+```ini
+SPSS_STARTUP_TIMEOUT=300
+```
+
+`SPSS_TIMEOUT` 控制分析执行超时，`SPSS_STARTUP_TIMEOUT` 控制 SPSS 引擎启动握手超时。
+
 ---
 
 ## 💡 开始使用
