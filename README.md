@@ -13,6 +13,25 @@ Describe your analysis in plain language — SPSS-MCP translates it into SPSS sy
 
 ---
 
+## Presentation Page
+
+配套网页主题：`Claude Code 与 SPSS-MCP：从概念到一键配置`
+
+适合培训、汇报和课堂演示，内容覆盖：
+- 什么是 Claude Code，以及它和网页对话式协作的区别
+- 什么是 MCP 协议
+- Claude Code 的安装与配置
+- GLM key 获取
+- SPSS-MCP 的安装、配置与一键接入
+- 简单统计分析示例与现场演示路径
+
+## Contact
+
+- 公众号：`人类变量`
+- 微信：`Exekiel179`
+
+---
+
 ## Requirements
 
 - Windows 10/11

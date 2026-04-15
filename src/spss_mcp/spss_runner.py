@@ -7,6 +7,7 @@ single SPSS Python3 process alive across all tool calls to avoid repeated
 """
 
 import asyncio
+import re
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -35,12 +36,15 @@ def _build_selection_syntax(
     if filter_variable and select_if:
         raise ValueError("filter_variable and select_if cannot be used together")
 
+    if not filter_variable and not select_if:
+        return ""
+
     prelude = "USE ALL.\nFILTER OFF.\nWEIGHT OFF.\nSPLIT FILE OFF.\n"
     if filter_variable:
         return prelude + f"FILTER BY {filter_variable}.\n"
     if select_if:
         return prelude + f"TEMPORARY.\nSELECT IF ({select_if}).\n"
-    return prelude
+    return ""
 
 
 def _build_full_syntax(
@@ -69,6 +73,24 @@ def _build_full_syntax(
         "OMSEND TAG='TXT1'.\n"
         f"{viewer_oms_end}"
     )
+
+
+_SYNTAX_WARNING_PATTERNS = [
+    re.compile(r"contains an invalid (?:keyword|subcommand)", re.IGNORECASE),
+    re.compile(r"unrecognized (?:keyword|subcommand)", re.IGNORECASE),
+    re.compile(r"this command is not valid", re.IGNORECASE),
+]
+
+
+def _extract_syntax_issue_warnings(raw_output: str) -> list[str]:
+    warnings: list[str] = []
+    for line in raw_output.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        if any(pattern.search(text) for pattern in _SYNTAX_WARNING_PATTERNS):
+            warnings.append(text)
+    return warnings
 
 
 async def run_syntax(
@@ -180,12 +202,23 @@ async def run_syntax(
     from spss_mcp.output_parser import extract_errors, extract_warnings
     parsed_errors = extract_errors(raw_output) if raw_output else []
     parsed_warnings = extract_warnings(raw_output) if raw_output else []
+    syntax_issue_warnings = _extract_syntax_issue_warnings(raw_output) if raw_output else []
 
     has_fatal_error = err_level >= 3 or bool(fatal_error and not warn_msg)
-    success = output_exists and bool(raw_output) and not has_fatal_error and not timed_out
+    has_syntax_issue_warning = bool(syntax_issue_warnings)
+    success = (
+        output_exists
+        and bool(raw_output)
+        and not has_fatal_error
+        and not timed_out
+        and not has_syntax_issue_warning
+    )
 
     markdown = parse_spss_output(raw_output) if raw_output else "_No output produced._"
     warnings: list[str] = list(parsed_warnings)
+    for warning in syntax_issue_warnings:
+        if warning not in warnings:
+            warnings.append(warning)
 
     if warn_msg and success:
         warnings.append(warn_msg)
@@ -203,6 +236,8 @@ async def run_syntax(
             error_msg = fatal_error
         elif err_level >= 3:
             error_msg = "; ".join(parsed_errors) if parsed_errors else f"SPSS reported fatal error level {err_level}"
+        elif has_syntax_issue_warning:
+            error_msg = "; ".join(syntax_issue_warnings)
         elif not output_exists:
             error_msg = "SPSS ran but produced no output file."
         else:
