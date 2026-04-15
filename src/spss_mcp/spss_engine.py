@@ -250,14 +250,33 @@ class SpssEngine:
                 "resp_file": resp_file,
             }) + "\n"
 
-            try:
-                self._proc.stdin.write(request_line.encode("utf-8"))
-                await self._proc.stdin.drain()
-            except Exception as e:
+            async def _write_request() -> tuple[bool, str | None]:
+                if not self._proc or not self._proc.stdin:
+                    return False, "SPSS engine stdin is not available."
+                try:
+                    self._proc.stdin.write(request_line.encode("utf-8"))
+                    await self._proc.stdin.drain()
+                    return True, None
+                except Exception as exc:
+                    return False, str(exc)
+
+            ok, write_error = await _write_request()
+            if not ok:
                 await self.stop()
+                restart_ok, restart_msg = await self._start()
+                if restart_ok:
+                    ok, retry_error = await _write_request()
+                    if ok:
+                        write_error = None
+                    else:
+                        write_error = retry_error
+                else:
+                    write_error = restart_msg
+
+            if write_error:
                 return {
                     "err_level": 99,
-                    "error": f"Failed to send syntax to SPSS engine: {e}",
+                    "error": f"Failed to send syntax to SPSS engine: {write_error}",
                     "warn": None,
                     "viewer_ok": False,
                     "output_exists": False,

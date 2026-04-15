@@ -43,9 +43,15 @@ spss-mcp status
 
 ### 步骤 2：配置 Claude Code
 
-1. 打开 Claude Code，按 `Ctrl + ,`
-2. 搜索 `mcpServers`
-3. 添加以下配置：
+推荐直接自动配置：
+
+```bash
+spss-mcp configure-claude
+```
+
+这个命令会自动检测 SPSS、备份 Claude Code 现有用户配置，并写入 `mcpServers.spss`。
+
+如果你想手动配置，再打开 Claude Code，按 `Ctrl + ,`，搜索 `mcpServers`，添加以下配置：
 
 ```json
 {
@@ -58,7 +64,7 @@ spss-mcp status
 }
 ```
 
-4. 保存并重启 Claude Code
+然后保存并重启 Claude Code。
 
 ### 步骤 3：验证连接
 

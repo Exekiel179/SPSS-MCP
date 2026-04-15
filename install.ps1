@@ -32,7 +32,7 @@ Write-Host ""
 Write-Host "[2/4] 验证安装..." -ForegroundColor Yellow
 $statusOutput = spss-mcp status 2>&1
 Write-Host $statusOutput
-if ($statusOutput -notmatch "SPSS\s+:\s+✓") {
+if ($statusOutput -match "SPSS batch : NOT FOUND") {
     Write-Host "[!] SPSS 未检测到，仅文件工具可用" -ForegroundColor Yellow
     Write-Host "如需使用分析工具，请确保已安装 IBM SPSS Statistics" -ForegroundColor Yellow
 }
@@ -48,11 +48,17 @@ Copy-Item -Recurse -Force "skills\spss-mcp-guard" "$skillsDir\spss-mcp-guard"
 Write-Host "[✓] 技能已安装到 $skillsDir" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "[4/4] 生成 Claude Code 配置..." -ForegroundColor Yellow
-Write-Host ""
-Write-Host "请将以下配置添加到 Claude Code 设置中（Ctrl+, 打开设置）：" -ForegroundColor Cyan
-Write-Host ""
-spss-mcp setup-info
+Write-Host "[4/4] 自动配置 Claude Code..." -ForegroundColor Yellow
+try {
+    $configOutput = spss-mcp configure-claude 2>&1
+    Write-Host $configOutput
+    Write-Host "[✓] Claude Code 配置已更新" -ForegroundColor Green
+} catch {
+    Write-Host "[✗] 自动配置失败，请手动执行: spss-mcp configure-claude" -ForegroundColor Red
+    Write-Host $_ -ForegroundColor Yellow
+    Read-Host "按回车键退出"
+    exit 1
+}
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -61,7 +67,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "下一步：" -ForegroundColor Yellow
 Write-Host "1. 重启 Claude Code" -ForegroundColor White
-Write-Host "2. 在 Claude Code 中输入：请分析 data.sav 文件" -ForegroundColor White
+Write-Host "2. 在 Claude Code 中输入：检查 SPSS 状态" -ForegroundColor White
 Write-Host ""
 Write-Host "详细文档：README.md 或 QUICK_START.md" -ForegroundColor Gray
 Write-Host ""

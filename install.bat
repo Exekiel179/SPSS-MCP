@@ -40,11 +40,14 @@ xcopy /E /I /Y skills\spss-mcp-guard "%SKILLS_DIR%\spss-mcp-guard" >nul 2>&1
 echo ✓ 技能已安装到 %SKILLS_DIR%
 
 echo.
-echo [4/4] 生成 Claude Code 配置...
-echo.
-echo 请将以下配置添加到 Claude Code 设置中（Ctrl+, 打开设置）：
-echo.
-spss-mcp setup-info
+echo [4/4] 自动配置 Claude Code...
+spss-mcp configure-claude
+if errorlevel 1 (
+    echo [错误] 自动配置失败，请手动执行: spss-mcp configure-claude
+    pause
+    exit /b 1
+)
+echo ✓ Claude Code 配置已更新
 
 echo.
 echo ========================================
@@ -53,7 +56,7 @@ echo ========================================
 echo.
 echo 下一步：
 echo 1. 重启 Claude Code
-echo 2. 在 Claude Code 中输入：请分析 data.sav 文件
+echo 2. 在 Claude Code 中输入：检查 SPSS 状态
 echo.
 echo 详细文档：README.md 或 QUICK_START.md
 echo.

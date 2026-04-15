@@ -4,10 +4,14 @@ Command-line interface for SPSS MCP server.
 
 import argparse
 import json
-import shutil
 import sys
-from pathlib import Path
 
+from spss_mcp.claude_config import (
+    build_mcp_server_config,
+    configure_claude_settings,
+    get_default_settings_path,
+    get_entrypoint_config,
+)
 from spss_mcp.server import mcp
 
 
@@ -35,6 +39,21 @@ def main():
     # setup-info
     subparsers.add_parser("setup-info", help="Show Claude Code MCP config snippet")
 
+    # configure-claude
+    configure_parser = subparsers.add_parser(
+        "configure-claude",
+        help="Detect SPSS and automatically update Claude Code settings",
+    )
+    configure_parser.add_argument(
+        "--settings-file",
+        help="Explicit Claude Code settings file path to update",
+    )
+    configure_parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Write to settings.local.json instead of settings.json",
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -60,43 +79,39 @@ def main():
         sys.exit(0)
 
     elif args.command == "setup-info":
-        installed_entrypoint = shutil.which("spss-mcp")
-        if installed_entrypoint:
-            executable_command = "spss-mcp"
-            executable_args = ["serve", "--transport", "stdio"]
-        else:
-            executable_command = sys.executable
-            executable_args = ["-m", "spss_mcp.cli", "serve", "--transport", "stdio"]
+        executable_command, executable_args = get_entrypoint_config()
 
         from spss_mcp._version import __version__
-        from spss_mcp.config import detect_capabilities, get_timeout
-        caps = detect_capabilities()
+        snippet = {"mcpServers": {"spss": build_mcp_server_config()}}
 
         print(f"=== SPSS MCP v{__version__} Setup Info ===")
         print(f"Command: {executable_command}")
         print(f"Args: {json.dumps(executable_args)}")
         print()
-        spss_path = caps.get("spss_path")
-        # strip stats.exe to get the install dir if we have a detected path
-        if spss_path:
-            spss_install = str(Path(spss_path).parent)
-        else:
-            spss_install = "<replace-with-your-spss-install-dir>"
-
-        snippet = {
-            "mcpServers": {
-                "spss": {
-                    "command": executable_command,
-                    "args": executable_args,
-                    "env": {
-                        "SPSS_INSTALL_PATH": spss_install,
-                        "SPSS_TIMEOUT": str(get_timeout()),
-                    },
-                }
-            }
-        }
         print("Add to your Claude Code MCP settings:")
         print(json.dumps(snippet, indent=2))
+        sys.exit(0)
+
+    elif args.command == "configure-claude":
+        settings_path = None
+        if args.settings_file:
+            from pathlib import Path
+
+            settings_path = Path(args.settings_file).expanduser()
+        elif args.local:
+            settings_path = get_default_settings_path(local=True)
+
+        result = configure_claude_settings(settings_path, local=args.local)
+        print("=== Claude Code configuration updated ===")
+        print(f"Status: {result['status']}")
+        print(f"Settings: {result['settings_path']}")
+        if result["backup_path"]:
+            print(f"Backup: {result['backup_path']}")
+        print()
+        print("Configured MCP entry:")
+        print(json.dumps({"spss": result["entry"]}, indent=2))
+        print()
+        print("Restart Claude Code to load the updated MCP server.")
         sys.exit(0)
 
     elif args.command == "serve":

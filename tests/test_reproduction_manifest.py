@@ -6,9 +6,11 @@ from spss_mcp import server
 from spss_mcp.spss_runner import run_syntax
 
 
+MANIFEST_PATH = Path(__file__).parent / "fixtures" / "reproduction_manifest.json"
+
+
 def test_reproduction_manifest_structure():
-    manifest_path = Path("F:/MCP/spss-mcp/tests/fixtures/reproduction_manifest.json")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert len(manifest) == 10
     for case in manifest:
@@ -22,8 +24,7 @@ def test_reproduction_manifest_structure():
 
 
 def test_reproduction_manifest_cases_execute_successfully():
-    manifest_path = Path("F:/MCP/spss-mcp/tests/fixtures/reproduction_manifest.json")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     for case in manifest:
         if case.get("syntax_kind") == "raw":

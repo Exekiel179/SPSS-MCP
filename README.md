@@ -40,11 +40,10 @@ Then restart Claude Code. Done!
 # 1. Install
 pip install -e .
 
-# 2. Get config
-spss-mcp setup-info
+# 2. Auto-configure Claude Code
+spss-mcp configure-claude
 
-# 3. Add config to Claude Code (Ctrl+,)
-# 4. Restart Claude Code
+# 3. Restart Claude Code
 ```
 
 ---
@@ -53,7 +52,18 @@ spss-mcp setup-info
 
 ### Basic Setup
 
-Add to Claude Code settings (`Ctrl+,` → search `mcpServers`):
+Recommended: let SPSS-MCP auto-configure Claude Code for you:
+
+```bash
+spss-mcp configure-claude
+```
+
+This command:
+- detects your SPSS installation
+- merges `mcpServers.spss` into Claude Code's user config (`~/.claude.json`)
+- creates a timestamped backup before updating existing settings
+
+If you prefer manual setup, add this to Claude Code settings (`Ctrl+,` → search `mcpServers`):
 
 ```json
 {
@@ -194,7 +204,8 @@ SPSS_TIMEOUT=300
 
 1. Check JSON syntax in settings
 2. Verify `spss-mcp` command works in terminal
-3. Restart Claude Code
+3. Re-run `spss-mcp configure-claude`
+4. Restart Claude Code
 
 ---
 
@@ -226,6 +237,7 @@ isort src/ tests/
 # CLI commands
 spss-mcp status       # Check environment
 spss-mcp setup-info   # Generate config
+spss-mcp configure-claude  # Auto-update Claude Code settings
 ```
 
 ---
